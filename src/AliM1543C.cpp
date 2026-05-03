@@ -678,10 +678,20 @@ void CAliM1543C::superio_reset()
 	state.superio_ldn_regs[5][0xf1] = 0x02;
 	state.superio_ldn_regs[5][0xf2] = 0x0c;
 
-	state.superio_ldn_regs[7][0x30] = 0x01;
-	state.superio_ldn_regs[7][0x70] = 0x01;
-	state.superio_ldn_regs[7][0x72] = 0x0c;
-	state.superio_ldn_regs[7][0xf0] = 0x00;
+	// Keyboard/AUX logical device, LDN 7.
+	// Whistler HAL reads these exact registers.
+	state.superio_ldn_regs[7][0x30] = 0x01; // active
+	state.superio_ldn_regs[7][0x60] = 0x00; // optional base high
+	state.superio_ldn_regs[7][0x61] = 0x60; // optional base low
+	state.superio_ldn_regs[7][0x70] = 0x01; // keyboard IRQ1
+	state.superio_ldn_regs[7][0x72] = 0x0c; // AUX IRQ12
+	state.superio_ldn_regs[7][0xf0] = 0x00; // vendor KBC config
+
+	// AUX logical device, LDN 8
+	state.superio_ldn_regs[8][0x30] =
+		myCfg->get_bool_value("mouse.enabled", true) ? 0x01 : 0x00;
+	state.superio_ldn_regs[8][0x70] = 0x0c;
+	state.superio_ldn_regs[8][0xf0] = 0x00;
 }
 
 u8 CAliM1543C::superio_current_reg() const
