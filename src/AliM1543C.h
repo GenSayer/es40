@@ -218,6 +218,21 @@ private:
   u8        superio_current_reg() const;
   void      superio_apply_ldn(int ldn);
 
+  // ISA Plug-and-Play protocol (ports 0x279 ADDRESS, 0xA79 WRITE_DATA,
+  // and an OS-selectable READ_DATA port in 0x203-0x3FF).  We expose no
+  // PnP cards, so the implementation only tracks enough protocol state
+  // to swallow the OS's enumeration cleanly and answer "no cards".
+  enum {
+    PNP_WAIT_FOR_KEY = 0,
+    PNP_SLEEP        = 1,
+    PNP_ISOLATION    = 2,
+    PNP_CONFIG       = 3
+  };
+  void      isapnp_addr_write(u8 data);
+  void      isapnp_data_write(u8 data);
+  u8        isapnp_data_read(u32 address);
+  static const u8 isapnp_init_key[32];
+
   /// The state structure contains all elements that need to be saved to the statefile.
   struct SAli_state
   {
@@ -257,6 +272,13 @@ private:
     u8        superio_ldn = 0;
     u8        superio_chip_regs[256]{};
     u8        superio_ldn_regs[16][256]{};
+
+    // ISA Plug-and-Play
+    int       isapnp_state    = 0;        // PNP_WAIT_FOR_KEY at boot
+    int       isapnp_key_pos  = 0;
+    u8        isapnp_reg      = 0;        // last register selected via 0x279
+    u16       isapnp_rd_port  = 0;        // OS-set RD_DATA port in 0x203-0x3FF
+    u8        isapnp_wake_csn = 0;
   } state;
 
   FILE* lpt;

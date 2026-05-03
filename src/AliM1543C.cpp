@@ -411,6 +411,17 @@ void CAliM1543C::init()
 	// SuperIO
 	add_legacy_io(40, 0x370, 2);
 
+	// ISA Plug-and-Play address (0x279) and write-data (0xA79) ports.
+	// The OS-selectable READ_DATA port (id 52) is registered dynamically
+	// when the OS programs it via PnP register 0x00.
+	add_legacy_io(50, 0x279, 1);
+	add_legacy_io(51, 0xa79, 1);
+	state.isapnp_state    = PNP_WAIT_FOR_KEY;
+	state.isapnp_key_pos  = 0;
+	state.isapnp_reg      = 0;
+	state.isapnp_rd_port  = 0;
+	state.isapnp_wake_csn = 0;
+
 	myRegLock = new CMutex("ali-reg");
 
 	myThread = 0;
@@ -502,11 +513,18 @@ u32 CAliM1543C::ReadMem_Legacy(int index, u32 address, int dsize)
 	case 20:  
 		return pic_read_vector();
 
-	case 30:  
+	case 30:
 		return pic_read_edge_level(address);
 
-	case 27:  
+	case 27:
 		return lpt_read(address);
+
+	case 50:  // 0x279 ADDRESS — write-only on real cards
+	case 51:  // 0xA79 WRITE_DATA — write-only on real cards
+		return 0xff;
+
+	case 52:  // OS-programmed READ_DATA port — no cards => 0xff
+		return isapnp_data_read(address);
 	}
 
 	return 0;
@@ -568,8 +586,8 @@ void CAliM1543C::WriteMem_Legacy(int index, u32 address, int dsize, u32 data)
 		pic_control_write(address, (u8)data);
 		return;
 
-	case 30:  
-		pic_write_edge_level(address, (u8)data); 
+	case 30:
+		pic_write_edge_level(address, (u8)data);
 		return;
 
 	case 40:
@@ -577,8 +595,19 @@ void CAliM1543C::WriteMem_Legacy(int index, u32 address, int dsize, u32 data)
 			superio_write(address + byte_offset, (u8)(data >> shift));
 		return;
 
-	case 27:  
-		lpt_write(address, (u8)data); 
+	case 27:
+		lpt_write(address, (u8)data);
+		return;
+
+	case 50:  // 0x279 ADDRESS
+		isapnp_addr_write((u8)data);
+		return;
+
+	case 51:  // 0xA79 WRITE_DATA
+		isapnp_data_write((u8)data);
+		return;
+
+	case 52:  // OS-programmed READ_DATA port — read-only on real cards
 		return;
 	}
 }
@@ -654,44 +683,63 @@ void CAliM1543C::superio_reset()
 	state.superio_ldn_regs[0][0xf2] = 0xff;
 	state.superio_ldn_regs[0][0xf4] = 0x00;
 
+	// LDN 3 — Parallel port.  Reset values mirror QEMU's M1543 emulation
+	// (hw/isa/m1543.c) which is the known-good reference for booting
+	// Windows NT 5.x on this chipset; the high bit in CFG0/CFG1 selects
+	// the parallel-port mode bits the OS expects to round-trip.
 	state.superio_ldn_regs[3][0x30] = 0x00;
 	state.superio_ldn_regs[3][0x60] = 0x03;
 	state.superio_ldn_regs[3][0x61] = 0x78;
 	state.superio_ldn_regs[3][0x70] = 0x05;
 	state.superio_ldn_regs[3][0x74] = 0x04;
-	state.superio_ldn_regs[3][0xf0] = 0x0c;
-	state.superio_ldn_regs[3][0xf1] = 0x05;
+	state.superio_ldn_regs[3][0xf0] = 0x8c;
+	state.superio_ldn_regs[3][0xf1] = 0x85;
 
+	// LDN 4 — UART1 (COM1).
 	state.superio_ldn_regs[4][0x30] = 0x00;
 	state.superio_ldn_regs[4][0x60] = 0x03;
 	state.superio_ldn_regs[4][0x61] = 0xf8;
 	state.superio_ldn_regs[4][0x70] = 0x04;
 	state.superio_ldn_regs[4][0xf0] = 0x00;
-	state.superio_ldn_regs[4][0xf1] = 0x02;
+	state.superio_ldn_regs[4][0xf1] = 0x00;
 	state.superio_ldn_regs[4][0xf2] = 0x0c;
 
+	// LDN 5 — UART2 (COM2).
 	state.superio_ldn_regs[5][0x30] = 0x00;
 	state.superio_ldn_regs[5][0x60] = 0x02;
 	state.superio_ldn_regs[5][0x61] = 0xf8;
 	state.superio_ldn_regs[5][0x70] = 0x03;
 	state.superio_ldn_regs[5][0xf0] = 0x00;
-	state.superio_ldn_regs[5][0xf1] = 0x02;
+	state.superio_ldn_regs[5][0xf1] = 0x00;
 	state.superio_ldn_regs[5][0xf2] = 0x0c;
 
-	// Keyboard/AUX logical device, LDN 7.
-	// Whistler HAL reads these exact registers.
+	// LDN 7 — Keyboard controller.  CFG0 bit 6 (0x40) is the KBC speed/
+	// translate enable bit.
 	state.superio_ldn_regs[7][0x30] = 0x01; // active
-	state.superio_ldn_regs[7][0x60] = 0x00; // optional base high
-	state.superio_ldn_regs[7][0x61] = 0x60; // optional base low
+	state.superio_ldn_regs[7][0x60] = 0x00; // base high (informational)
+	state.superio_ldn_regs[7][0x61] = 0x60; // base low — KBC at 0x60/0x64
 	state.superio_ldn_regs[7][0x70] = 0x01; // keyboard IRQ1
 	state.superio_ldn_regs[7][0x72] = 0x0c; // AUX IRQ12
-	state.superio_ldn_regs[7][0xf0] = 0x00; // vendor KBC config
+	state.superio_ldn_regs[7][0xf0] = 0x40; // KBC vendor config
 
-	// AUX logical device, LDN 8
+	// LDN 8 — AUX (mouse).  M1543C exposes mouse via the LDN 7 KBC
+	// (the IRQ12 wire is on KBD's reg 0x72), but NT may also probe LDN 8
+	// as a separate "logical" mouse device — keep it advertised so the
+	// PnP enumerator doesn't mark the port driver as "no mouse".
 	state.superio_ldn_regs[8][0x30] =
 		myCfg->get_bool_value("mouse.enabled", true) ? 0x01 : 0x00;
 	state.superio_ldn_regs[8][0x70] = 0x0c;
 	state.superio_ldn_regs[8][0xf0] = 0x00;
+
+	// LDN 0xC — Hotkey controller. Whistler's
+	// PnP enumerator reads these to determine whether a hotkey logical
+	// device exists.  Reporting consistent values keeps the enumeration
+	// from looping on this LDN.
+	state.superio_ldn_regs[0xc][0xf0] = 0x35;
+	state.superio_ldn_regs[0xc][0xf1] = 0x14;
+	state.superio_ldn_regs[0xc][0xf2] = 0x11;
+	state.superio_ldn_regs[0xc][0xf3] = 0x71;
+	state.superio_ldn_regs[0xc][0xf4] = 0x42;
 }
 
 u8 CAliM1543C::superio_current_reg() const
@@ -807,8 +855,21 @@ void CAliM1543C::superio_apply_ldn(int ldn)
 	const u8 activate = state.superio_ldn_regs[ldn][0x30] & 0x01;
 	const u16 base = (u16)((state.superio_ldn_regs[ldn][0x60] << 8) |
 		state.superio_ldn_regs[ldn][0x61]);
+	const u8 irq1 = state.superio_ldn_regs[ldn][0x70];
+	const u8 irq2 = state.superio_ldn_regs[ldn][0x72];
 
-	if (ldn == 3) {  // parallel port
+	switch (ldn) {
+	case 0:  // FDC.  CFloppyController binds 0x3f0-0x3f7 statically;
+		// honoring an OS-driven relocation here would require a hook into
+		// that class.  For now just acknowledge the activation so PnP
+		// enumeration sees a coherent picture.
+#ifdef DEBUG_SUPERIO
+		printf("%s: FDC %s (base=%#06x irq=%u)\n", devid_string,
+			activate ? "activated" : "deactivated", base, irq1);
+#endif
+		break;
+
+	case 3:  // LPT — only LDN with dynamic binding implemented.
 		if (activate && base != 0) {
 			add_legacy_io(27, base & 0xfffc, 4);
 #ifdef DEBUG_SUPERIO
@@ -821,8 +882,184 @@ void CAliM1543C::superio_apply_ldn(int ldn)
 				devid_string, activate, base);
 		}
 #endif
+		break;
+
+	case 4:  // UART1 (COM1).  CSerial binds its ports per-instance from
+		// the configurator.
+	case 5:  // UART2 (COM2).
+#ifdef DEBUG_SUPERIO
+		printf("%s: COM%d %s (base=%#06x irq=%u)\n", devid_string, ldn - 3,
+			activate ? "activated" : "deactivated", base, irq1);
+#endif
+		break;
+
+	case 7:  // Keyboard controller.  CKeyboard binds 0x60/0x64 statically;
+		// the LDN advertises the same so the OS sees a self-consistent
+		// SuperIO view.
+#ifdef DEBUG_SUPERIO
+		printf("%s: KBC %s (base=%#06x kbd_irq=%u aux_irq=%u)\n",
+			devid_string, activate ? "activated" : "deactivated",
+			base, irq1, irq2);
+#endif
+		(void)irq2;
+		break;
+
+	case 8:  // AUX (mouse) — IRQ wire lives on the KBC; nothing to bind.
+#ifdef DEBUG_SUPERIO
+		printf("%s: AUX %s (irq=%u)\n", devid_string,
+			activate ? "activated" : "deactivated", irq1);
+#endif
+		break;
+
+	default:
+#ifdef DEBUG_SUPERIO
+		printf("%s: LDN %#x apply (activate=%u base=%#06x)\n",
+			devid_string, ldn, activate, base);
+#endif
+		break;
 	}
-	// Extend for ldn 0 (FDC), 4/5 (UART), 7 (KBC) as those gain dynamic binding.
+}
+
+/**
+ * \brief ISA Plug-and-Play protocol handlers.
+ *
+ * The OS drives ISA PnP card discovery via three I/O ports:
+ *   - 0x279 (ADDRESS, write-only): selects the next register to access
+ *     and is also the channel for the 32-byte LFSR initiation key that
+ *     transitions cards from Wait-For-Key into Sleep state.
+ *   - 0xA79 (WRITE_DATA, write-only): writes the value of the register
+ *     previously selected via 0x279.
+ *   - READ_DATA (read-only): an OS-selectable address in 0x203-0x3FF,
+ *     programmed by writing PnP register 0x00.  Used for serial
+ *     isolation reads and per-card resource descriptor reads.
+ *
+ * The es40 platform exposes no ISA PnP cards.  The handlers below run
+ * the protocol state machine just enough to swallow the OS's enumeration
+ * cleanly and report "no cards found": isolation reads return 0xff so
+ * the OS sees a failed alternating 0x55/0xAA pattern and gives up after
+ * the standard timeout, instead of generating a flood of "unknown IO
+ * port" warnings every boot.
+ *
+ * Reference: Plug and Play ISA Specification, version 1.0a (1994),
+ * Microsoft / Intel, section 4 (auto-configuration ports).
+ **/
+
+const u8 CAliM1543C::isapnp_init_key[32] = {
+	0x6A, 0xB5, 0xDA, 0xED, 0xF6, 0xFB, 0x7D, 0xBE,
+	0xDF, 0x6F, 0x37, 0x1B, 0x0D, 0x86, 0xC3, 0x61,
+	0xB0, 0x58, 0x2C, 0x16, 0x8B, 0x45, 0xA2, 0xD1,
+	0xE8, 0x74, 0x3A, 0x9D, 0xCE, 0xE7, 0x73, 0x39
+};
+
+void CAliM1543C::isapnp_addr_write(u8 data)
+{
+#ifdef DEBUG_ISAPNP
+	printf("%%PNP-I-ADDR: write 0x%02x to 0x279 (state=%d, key_pos=%d)\n",
+		data, state.isapnp_state, state.isapnp_key_pos);
+#endif
+
+	if (state.isapnp_state == PNP_WAIT_FOR_KEY)
+	{
+		// Per spec 4.3.2: the LFSR is reset by writing 0x00 to ADDRESS
+		// twice in succession, after which the 32-byte initiation key
+		// must arrive byte-by-byte without interruption.  Any byte that
+		// fails to match the expected position resets our match counter.
+		if (data == 0x00 && state.isapnp_key_pos < 2)
+		{
+			state.isapnp_key_pos = 0;
+			return;
+		}
+
+		if (data == isapnp_init_key[state.isapnp_key_pos])
+		{
+			state.isapnp_key_pos++;
+			if (state.isapnp_key_pos >= 32)
+			{
+#ifdef DEBUG_ISAPNP
+				printf("%%PNP-I-KEY: initiation key accepted, entering SLEEP\n");
+#endif
+				state.isapnp_state   = PNP_SLEEP;
+				state.isapnp_key_pos = 0;
+			}
+		}
+		else
+		{
+			state.isapnp_key_pos = 0;
+		}
+		return;
+	}
+
+	// Past the key — every ADDRESS write selects the register that the
+	// next 0xA79 / READ_DATA access will operate on.
+	state.isapnp_reg = data;
+}
+
+void CAliM1543C::isapnp_data_write(u8 data)
+{
+#ifdef DEBUG_ISAPNP
+	printf("%%PNP-I-DATA: write 0x%02x to reg 0x%02x (state=%d)\n",
+		data, state.isapnp_reg, state.isapnp_state);
+#endif
+
+	if (state.isapnp_state == PNP_WAIT_FOR_KEY)
+		return;
+
+	switch (state.isapnp_reg)
+	{
+	case 0x00:  // Set RD_DATA Port — actual port = (data << 2) | 0x0003
+	{
+		u16 new_port = ((u16)data << 2) | 0x0003;
+		state.isapnp_rd_port = new_port;
+		// Re-register our READ_DATA hook at the OS-chosen port.  The
+		// system memory map updates id 52 in place, so successive
+		// programmings just relocate the same registration.
+		add_legacy_io(52, new_port, 1);
+#ifdef DEBUG_ISAPNP
+		printf("%%PNP-I-RDPORT: READ_DATA port set to 0x%03x\n", new_port);
+#endif
+		break;
+	}
+
+	case 0x02:  // Config Control
+		// bit 0: Reset (drives RESET_DRV — all cards back to Wait-For-Key)
+		// bit 1: Wait For Key (return to Wait-For-Key)
+		// bit 2: Reset CSN (clear all CSNs to zero)
+		if (data & 0x03)
+		{
+			state.isapnp_state   = PNP_WAIT_FOR_KEY;
+			state.isapnp_key_pos = 0;
+		}
+		break;
+
+	case 0x03:  // Wake[CSN]
+		state.isapnp_wake_csn = data;
+		// CSN==0 with a card in Sleep starts isolation; non-zero wakes
+		// the card with that CSN into Config.  We have no cards either
+		// way, but tracking the state lets future reads of register 0x05
+		// (Status) return something coherent if asked.
+		if (state.isapnp_state == PNP_SLEEP)
+			state.isapnp_state = (data == 0) ? PNP_ISOLATION : PNP_CONFIG;
+		break;
+
+	case 0x06:  // Set CSN — assign CSN to the card that won isolation.
+		// No card won, no-op.
+		break;
+
+	default:
+		// Logical-device select (0x07), card-level resource registers
+		// (0x20-0x2F) and per-LDN resource registers (0x30-0xFF) are
+		// per-card.  No cards, nothing to record.
+		break;
+	}
+}
+
+u8 CAliM1543C::isapnp_data_read(u32 /*address*/)
+{
+	// With no PnP cards driving the bus, isolation reads see floating
+	// pull-ups (0xff).  The OS interprets a {0xff, 0xff} pair as a "0"
+	// bit; after 72 such reads it computes a checksum that won't match,
+	// concludes no card responded, and ends the isolation sequence.
+	return 0xff;
 }
 
 /**

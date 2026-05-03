@@ -149,6 +149,9 @@
 // Define if you want to enable SuperIO debugging
 //#define DEBUG_SUPERIO
 
+// Define if you want to enable ISA Plug-and-Play (ports 0x279 / 0xA79) debugging
+//#define DEBUG_ISAPNP
+
 // Working on VGA rendering for graphical components
 //#define DEBUG_VGA_RENDER
 
