@@ -1373,11 +1373,25 @@ void CAliM1543C::pic_write(int index, u32 address, u8 data)
 			{
 			case 1:
 
-				//non-specific EOI
-				state.pic_asserted[index] = 0;
+				// Non-specific EOI: a real 8259 clears the highest-priority
+				// (lowest-numbered) bit currently in ISR.  We collapse IRR
+				// and ISR into a single pic_asserted, so approximate by
+				// clearing only the lowest-numbered asserted bit instead of
+				// wiping the whole register — otherwise any IRQ that
+				// arrived during the in-service window is silently dropped.
+				{
+					u8 a = state.pic_asserted[index];
+					if (a)
+					{
+						int lvl = 0;
+						while (!(a & (1 << lvl)))
+							lvl++;
+						state.pic_asserted[index] &= ~(1 << lvl);
+					}
+				}
 
 				//
-				if (index == 1)
+				if ((index == 1) && (!state.pic_asserted[1]))
 					state.pic_asserted[0] &= ~(1 << 2);
 
 				//
@@ -1426,8 +1440,11 @@ void CAliM1543C::pic_write(int index, u32 address, u8 data)
 			return;
 
 		case PIC_STD:
+			// Mask register only gates delivery on a real 8259 — it does
+			// NOT clear IRR.  Clobbering pic_asserted on every mask write
+			// loses any interrupt latched while the OS is at a high IRQL,
+			// and additionally desyncs the cascade / DRIR55 state.
 			state.pic_mask[index] = data;
-			state.pic_asserted[index] &= ~data;
 			return;
 		}
 	}
