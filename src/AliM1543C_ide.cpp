@@ -1160,7 +1160,7 @@ void CAliM1543C_ide::ide_busmaster_write(int index, u32 address, u32 data,
 			do_pci_read(prd_address + 4, &control, 4, 1);
 			printf("-IDE-I-PRD: base: %x, control: %x  \n", base, control);
 			prd_address += 8;
-		} while (base & 0x80 == 0);
+		} while ((control & 0x80000000) == 0);
 #endif
 		break;
 
