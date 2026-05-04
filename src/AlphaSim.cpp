@@ -271,10 +271,6 @@ void segv_handler(int signum)
  *  - Cleans up.
  *  .
  **/
-#if defined(HAVE_SDL)
-extern void sdl_early_init();   // src/gui/sdl.cpp
-#endif
-
 int main(int argc, char* argv[])
 {
 	printf("\n\n");
@@ -300,13 +296,6 @@ int main(int argc, char* argv[])
 	signal(SIGSEGV, &segv_handler);
 	signal(SIGUSR1, &segv_handler);
 #endif
-
-#if defined(HAVE_SDL)
-	// Bring up the main window before config parse / LoadROM so the user
-	// sees the toolbar immediately.
-	sdl_early_init();
-#endif
-
 	try
 	{
 #if defined(IDB) && (defined(LS_MASTER) || defined(LS_SLAVE))
@@ -449,8 +438,6 @@ int main(int argc, char* argv[])
 	{
 		printf("Exiting gracefully: %s\n", e.displayText().c_str());
 
-		// Stop orch first so it can't race with the teardown.
-		theSystem->stop_orchestration();
 		theSystem->stop_threads();
 
 		// save flash and dpr rom only if not terminated with a fatal error
@@ -498,7 +485,6 @@ int main(int argc, char* argv[])
 		printf("Emulator Failure: %s\n", e.displayText().c_str());
 		if (theSystem)
 		{
-			theSystem->stop_orchestration();
 			theSystem->stop_threads();
 			delete theSystem;
 		}

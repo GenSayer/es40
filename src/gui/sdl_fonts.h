@@ -44,7 +44,7 @@
 #ifndef BX_SDL_H
 #define BX_SDL_H
 
-static unsigned char sdl_font8x16[256][16] = {
+unsigned char sdl_font8x16[256][16] = {
   {   0,   0,   0,   0,   0,   0,   0,   0,   // 0
     0,   0,   0,   0,   0,   0,   0,   0},
   {   0,   0, 126, 129, 165, 129, 129, 189,   // 1
@@ -558,7 +558,7 @@ static unsigned char sdl_font8x16[256][16] = {
   {   0,   0,   0,   0,   0,   0,   0,   0,   // 255
     0,   0,   0,   0,   0,   0,   0,   0} };
 
-static unsigned char sdl_font8x8[256][8] = {
+unsigned char sdl_font8x8[256][8] = {
   {   0,   0,   0,   0,   0,   0,   0,   0},  // 0
   { 126, 129, 165, 129, 189, 153, 129, 126},  // 1
   { 126, 255, 219, 255, 195, 231, 255, 126},  // 2

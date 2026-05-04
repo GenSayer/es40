@@ -94,7 +94,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <vector>
 #include <SDL3/SDL.h>
 
 #include "sdl_fonts.h"
@@ -136,187 +135,6 @@ static SDL_Window*   sdl_window = NULL;
 static SDL_Renderer* sdl_renderer = NULL;
 static SDL_Texture*  sdl_texture = NULL;
 
-extern unsigned res_x, res_y;   // defined later in this file
-
-// Toolbar strip across the top of the main window: machine status label
-// and Start / Stop buttons. The VGA framebuffer is rendered below it with
-// aspect preservation.
-static const int TOOLBAR_H        = 40;
-static const int TOOLBAR_FONT_SC  = 1;     // 8x16 glyph scale
-static const int TOOLBAR_BTN_W    = 80;
-static const int TOOLBAR_BTN_H    = 30;
-static const int TOOLBAR_BTN_GAP  = 8;
-static const int TOOLBAR_BTN_MARG = 10;    // right-edge margin
-static const int TOOLBAR_DEFAULT_VGA_W = 640;
-static const int TOOLBAR_DEFAULT_VGA_H = 480;
-
-enum HitTarget { HIT_NONE, HIT_START, HIT_STOP };
-
-static HitTarget tb_hover = HIT_NONE;
-static bool      tb_dirty = true;
-static SDL_FRect tb_rect_start{};
-static SDL_FRect tb_rect_stop{};
-
-static void tb_recalc_rects()
-{
-	if (!sdl_window) return;
-	int w = 0, h = 0;
-	SDL_GetWindowSize(sdl_window, &w, &h);
-	const float bw = (float)TOOLBAR_BTN_W;
-	const float bh = (float)TOOLBAR_BTN_H;
-	const float by = (float)((TOOLBAR_H - TOOLBAR_BTN_H) / 2);
-	const float right = (float)(w - TOOLBAR_BTN_MARG);
-	tb_rect_stop  = SDL_FRect{ right - bw,                                by, bw, bh };
-	tb_rect_start = SDL_FRect{ right - bw * 2.0f - TOOLBAR_BTN_GAP,       by, bw, bh };
-}
-
-static HitTarget tb_hit_test(int x, int y)
-{
-	auto inside = [&](const SDL_FRect& r) {
-		return (float)x >= r.x && (float)x < r.x + r.w
-			&& (float)y >= r.y && (float)y < r.y + r.h;
-	};
-	if (y >= TOOLBAR_H) return HIT_NONE;
-	if (inside(tb_rect_start)) return HIT_START;
-	if (inside(tb_rect_stop))  return HIT_STOP;
-	return HIT_NONE;
-}
-
-static void tb_draw_char(int px, int py, int scale, char c, SDL_Color col)
-{
-	const unsigned char* glyph = sdl_font8x16[(unsigned char)c];
-	SDL_SetRenderDrawColor(sdl_renderer, col.r, col.g, col.b, col.a);
-	for (int row = 0; row < 16; ++row) {
-		unsigned char bits = glyph[row];
-		for (int colx = 0; colx < 8; ++colx) {
-			if (bits & (0x80u >> colx)) {
-				SDL_FRect r{ (float)(px + colx * scale),
-				             (float)(py + row * scale),
-				             (float)scale, (float)scale };
-				SDL_RenderFillRect(sdl_renderer, &r);
-			}
-		}
-	}
-}
-
-static int tb_text_width_px(int scale, const char* s)
-{
-	int n = 0; while (s[n]) ++n;
-	return n * 8 * scale;
-}
-
-static void tb_draw_text(int px, int py, int scale, const char* s, SDL_Color col)
-{
-	for (int i = 0; s[i]; ++i)
-		tb_draw_char(px + i * 8 * scale, py, scale, s[i], col);
-}
-
-static void tb_draw_button(const SDL_FRect& r, const char* label,
-                           bool enabled, bool hovered)
-{
-	const SDL_Color face       = enabled ? (hovered ? SDL_Color{110,110,110,255}
-	                                                : SDL_Color{ 80, 80, 80,255})
-	                                     : SDL_Color{ 50, 50, 50,255};
-	const SDL_Color border     = enabled ? SDL_Color{200,200,200,255}
-	                                     : SDL_Color{120,120,120,255};
-	const SDL_Color text       = enabled ? SDL_Color{240,240,240,255}
-	                                     : SDL_Color{130,130,130,255};
-	SDL_SetRenderDrawColor(sdl_renderer, face.r, face.g, face.b, face.a);
-	SDL_RenderFillRect(sdl_renderer, &r);
-	SDL_SetRenderDrawColor(sdl_renderer, border.r, border.g, border.b, border.a);
-	SDL_RenderRect(sdl_renderer, &r);
-
-	const int tw = tb_text_width_px(TOOLBAR_FONT_SC, label);
-	const int th = 16 * TOOLBAR_FONT_SC;
-	const int tx = (int)(r.x + (r.w - (float)tw) * 0.5f);
-	const int ty = (int)(r.y + (r.h - (float)th) * 0.5f);
-	tb_draw_text(tx, ty, TOOLBAR_FONT_SC, label, text);
-}
-
-// Draws the toolbar strip in window-pixel coordinates.
-static void tb_draw()
-{
-	if (!sdl_renderer || !sdl_window) return;
-
-	int w = 0, h = 0;
-	SDL_GetWindowSize(sdl_window, &w, &h);
-
-	// Background bar
-	SDL_FRect bar{ 0.f, 0.f, (float)w, (float)TOOLBAR_H };
-	SDL_SetRenderDrawColor(sdl_renderer, 32, 32, 32, 255);
-	SDL_RenderFillRect(sdl_renderer, &bar);
-	// Bottom border line
-	SDL_SetRenderDrawColor(sdl_renderer, 80, 80, 80, 255);
-	SDL_FRect line{ 0.f, (float)(TOOLBAR_H - 1), (float)w, 1.f };
-	SDL_RenderFillRect(sdl_renderer, &line);
-
-	const bool running = theSystem ? theSystem->IsMachineRunning() : false;
-
-	// Status text on the left.
-	const char* prefix = "Machine: ";
-	const char* state  = running ? "Running" : "Stopped";
-	const SDL_Color stateCol = running ? SDL_Color{ 90,220,110,255}
-	                                   : SDL_Color{230,110,110,255};
-	const SDL_Color label    = SDL_Color{220,220,220,255};
-	const int textY = (TOOLBAR_H - 16 * TOOLBAR_FONT_SC) / 2;
-	tb_draw_text(10, textY, TOOLBAR_FONT_SC, prefix, label);
-	tb_draw_text(10 + tb_text_width_px(TOOLBAR_FONT_SC, prefix),
-	             textY, TOOLBAR_FONT_SC, state, stateCol);
-
-	// Buttons. Disabled until theSystem exists; afterwards Start is enabled
-	// only while stopped, Stop only while running.
-	const bool clickable = (theSystem != nullptr);
-	tb_recalc_rects();
-	tb_draw_button(tb_rect_start, "Start",
-	               clickable && !running,
-	               tb_hover == HIT_START && clickable && !running);
-	tb_draw_button(tb_rect_stop,  "Stop",
-	               clickable && running,
-	               tb_hover == HIT_STOP  && clickable && running);
-}
-
-// VGA blit rect: full window minus the toolbar, aspect preserved.
-static void tb_compute_vga_rect(SDL_FRect* out)
-{
-	int w = 0, h = 0;
-	SDL_GetWindowSize(sdl_window, &w, &h);
-	int avail_h = h - TOOLBAR_H;
-	if (avail_h < 1) avail_h = 1;
-
-	float ax = (res_x ? (float)res_x : (float)TOOLBAR_DEFAULT_VGA_W);
-	float ay = (res_y ? (float)res_y : (float)TOOLBAR_DEFAULT_VGA_H);
-	const float aspect = ax / ay;
-
-	int vga_w, vga_h;
-	if ((float)avail_h * aspect <= (float)w) {
-		vga_h = avail_h;
-		vga_w = (int)((float)vga_h * aspect);
-	} else {
-		vga_w = w;
-		vga_h = (int)((float)vga_w / aspect);
-	}
-	out->x = (float)((w - vga_w) / 2);
-	out->y = (float)(TOOLBAR_H + (avail_h - vga_h) / 2);
-	out->w = (float)vga_w;
-	out->h = (float)vga_h;
-}
-
-// Render VGA texture (only when emulation is live, so a stale last-frame
-// doesn't show through after Stop) plus the toolbar, then present.
-static void tb_present()
-{
-	if (!sdl_renderer) return;
-	SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
-	SDL_RenderClear(sdl_renderer);
-	if (sdl_texture && theSystem && theSystem->IsMachineRunning()) {
-		SDL_FRect dst{};
-		tb_compute_vga_rect(&dst);
-		SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, &dst);
-	}
-	tb_draw();
-	SDL_RenderPresent(sdl_renderer);
-}
-
 
 SDL_Event           sdl_event;
 int                 sdl_grab = 0;
@@ -331,210 +149,22 @@ static bool         sdl_swallow_end_release = false;
 static const char*  sdl_title = "ES40 Emulator - Ctrl+Alt+End sends Ctrl+Alt+Del";
 static const char*  sdl_title_grabbed = "ES40 Emulator - Ctrl+F10 releases mouse - Ctrl+Alt+End sends Ctrl+Alt+Del";
 
-// SDL3 on Windows binds a window's message queue to the thread that created
-// it, so all SDL state lives on a dedicated thread spawned by sdl_early_init;
-// other threads communicate via the pending block below. The thread_local
-// flag lets handle_events() no-op when S3 calls it from its own pump tick.
-static thread_local bool      tls_is_sdl_thread = false;
-
-// Set when the user closes the window. Polled by Run() / SingleStep on the
-// main thread, which then throws FAILURE(Graceful) so AlphaSim's catch path
-// can run normal shutdown — a FAILURE thrown from the SDL thread itself
-// would just be swallowed by CThread's exception wrapper.
-std::atomic<bool>             sdl_quit_requested{ false };
-
-static std::mutex             sdl_pending_mtx;
-static bool                   sdl_pending_frame = false;
-static std::vector<u32>       sdl_pending_pixels;
-static unsigned               sdl_pending_frame_w = 0;
-static unsigned               sdl_pending_frame_h = 0;
-
-static bool                   sdl_pending_dim = false;
-static unsigned               sdl_pending_dim_w = 0;
-static unsigned               sdl_pending_dim_h = 0;
-
-static bool                   sdl_pending_mouse = false;
-static bool                   sdl_pending_mouse_grab = false;
-
-static bool                   sdl_pending_clear = false;
-
-static unsigned               sdl_texture_w = 0;
-static unsigned               sdl_texture_h = 0;
-
-static std::atomic<bool>      sdl_thread_ready{ false };
-static std::atomic<bool>      sdl_thread_stop{ false };
-
-class SDLThreadRunner : public CRunnable
-{
-public:
-	void run() override
-	{
-		tls_is_sdl_thread = true;
-		if (!SDL_Init(SDL_INIT_VIDEO))
-		{
-			FAILURE(SDL, "Unable to initialize SDL3 video subsystem");
-		}
-
-		const int w = TOOLBAR_DEFAULT_VGA_W;
-		const int h = TOOLBAR_H + TOOLBAR_DEFAULT_VGA_H;
-
-		sdl_window = SDL_CreateWindow(sdl_title, w, h, SDL_WINDOW_RESIZABLE);
-		if (!sdl_window)
-		{
-			FAILURE_3(SDL, "Unable to create SDL3 window: %ix%i: %s\n",
-				w, h, SDL_GetError());
-		}
-
-		sdl_renderer = SDL_CreateRenderer(sdl_window, NULL);
-		if (!sdl_renderer)
-		{
-			FAILURE_3(SDL, "Unable to create SDL3 renderer: %ix%i: %s\n",
-				w, h, SDL_GetError());
-		}
-
-		tb_recalc_rects();
-		tb_dirty = true;
-		tb_present();
-
-		sdl_thread_ready.store(true, std::memory_order_release);
-
-		while (!sdl_thread_stop.load(std::memory_order_acquire))
-		{
-			// Drain events. theGui might not exist yet during pre-init —
-			// just pump so the window stays responsive in that case.
-			if (theGui) theGui->handle_events();
-			else        SDL_PumpEvents();
-
-			// Apply pending requests posted by other threads.
-			bool need_redraw = tb_dirty;
-			{
-				std::lock_guard<std::mutex> lk(sdl_pending_mtx);
-
-				if (sdl_pending_dim)
-				{
-					if (sdl_texture)
-					{
-						SDL_DestroyTexture(sdl_texture);
-						sdl_texture = NULL;
-					}
-					sdl_texture = SDL_CreateTexture(sdl_renderer,
-						SDL_PIXELFORMAT_ARGB8888,
-						SDL_TEXTUREACCESS_STREAMING,
-						(int)sdl_pending_dim_w, (int)sdl_pending_dim_h);
-					if (sdl_texture)
-					{
-						SDL_SetTextureScaleMode(sdl_texture, SDL_SCALEMODE_NEAREST);
-						sdl_texture_w = sdl_pending_dim_w;
-						sdl_texture_h = sdl_pending_dim_h;
-						res_x = sdl_pending_dim_w;
-						res_y = sdl_pending_dim_h;
-						half_res_x = res_x / 2;
-						half_res_y = res_y / 2;
-
-						// Resize window to fit toolbar + new guest resolution.
-						SDL_SetWindowSize(sdl_window,
-							(int)sdl_pending_dim_w,
-							(int)sdl_pending_dim_h + TOOLBAR_H);
-						tb_recalc_rects();
-					}
-					sdl_pending_dim = false;
-					need_redraw = true;
-				}
-
-				if (sdl_pending_frame && sdl_texture
-					&& sdl_pending_frame_w == sdl_texture_w
-					&& sdl_pending_frame_h == sdl_texture_h)
-				{
-					SDL_UpdateTexture(sdl_texture, NULL,
-						sdl_pending_pixels.data(),
-						(int)(sdl_pending_frame_w * sizeof(u32)));
-					need_redraw = true;
-				}
-				sdl_pending_frame = false;
-
-				if (sdl_pending_mouse)
-				{
-					if (sdl_pending_mouse_grab)
-					{
-						SDL_HideCursor();
-						SDL_SetWindowRelativeMouseMode(sdl_window, true);
-						SDL_SetWindowTitle(sdl_window, sdl_title_grabbed);
-					}
-					else
-					{
-						SDL_ShowCursor();
-						SDL_SetWindowRelativeMouseMode(sdl_window, false);
-						SDL_SetWindowTitle(sdl_window, sdl_title);
-					}
-					sdl_grab = sdl_pending_mouse_grab ? 1 : 0;
-					sdl_pending_mouse = false;
-				}
-
-				if (sdl_pending_clear)
-				{
-					sdl_pending_clear = false;
-					need_redraw = true;
-				}
-			}
-
-			// Repaint when the machine state flips (toolbar color swap).
-			{
-				static bool prev_running = false;
-				const bool now_running = theSystem ? theSystem->IsMachineRunning() : false;
-				if (now_running != prev_running)
-				{
-					prev_running = now_running;
-					need_redraw = true;
-				}
-			}
-
-			if (need_redraw)
-			{
-				tb_present();
-				tb_dirty = false;
-			}
-
-			SDL_Delay(16);
-		}
-
-		// Teardown on the same thread that created these.
-		if (sdl_texture)  { SDL_DestroyTexture(sdl_texture);   sdl_texture = NULL; }
-		if (sdl_renderer) { SDL_DestroyRenderer(sdl_renderer); sdl_renderer = NULL; }
-		if (sdl_window)   { SDL_DestroyWindow(sdl_window);     sdl_window = NULL; }
-	}
-};
-
-static SDLThreadRunner sdl_runner;
-static CThread*        sdl_thread = nullptr;
-
 bx_sdl_gui_c::bx_sdl_gui_c(CConfigurator* cfg)
 {
 	myCfg = cfg;
 	bx_keymap = new bx_keymap_c(cfg);
 }
 
-// Called from AlphaSim main() so the window appears immediately. Spawns
-// the SDL thread and waits briefly for it to confirm window creation.
-void sdl_early_init()
-{
-	if (sdl_thread) return;
-	sdl_thread = new CThread("sdl");
-	sdl_thread->start(sdl_runner);
-
-	// Bound the wait so a hard SDL init failure doesn't deadlock startup.
-	for (int spin = 0; spin < 200; ++spin)   // up to ~2 seconds
-	{
-		if (sdl_thread_ready.load(std::memory_order_acquire))
-			break;
-		CThread::sleep(10);
-	}
-}
-
 void bx_sdl_gui_c::specific_init(unsigned x_tilesize, unsigned y_tilesize)
 {
-	// Window/SDL state lives on the SDL thread (created by sdl_early_init).
-	if (!sdl_thread)
-		sdl_early_init();
+	if (!SDL_Init(SDL_INIT_VIDEO))
+	{
+		FAILURE(SDL, "Unable to initialize SDL3 video subsystem");
+	}
+
+	// Create the initial window + renderer + texture at 640x480.
+	// dimension_update() will recreate the texture if the resolution changes.
+	dimension_update(640, 480);
 
 	// SDL3: key repeat is handled by the OS; no SDL_EnableKeyRepeat().
 
@@ -549,12 +179,17 @@ void bx_sdl_gui_c::specific_init(unsigned x_tilesize, unsigned y_tilesize)
 
 void bx_sdl_gui_c::graphics_frame_update(const u32* pixels, unsigned width, unsigned height)
 {
-	// Hand the pixels to the SDL thread for upload/present.
-	std::lock_guard<std::mutex> lk(sdl_pending_mtx);
-	sdl_pending_frame_w = width;
-	sdl_pending_frame_h = height;
-	sdl_pending_pixels.assign(pixels, pixels + (size_t)width * height);
-	sdl_pending_frame = true;
+	if (!sdl_texture || !sdl_renderer)
+		return;
+
+	// Upload the ARGB32 pixels directly to the streaming texture.
+	// pitch = width * 4 bytes per pixel
+	SDL_UpdateTexture(sdl_texture, NULL, pixels, (int)(width * sizeof(u32)));
+
+	// Present: clear -> draw texture -> flip
+	SDL_RenderClear(sdl_renderer);
+	SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, NULL);
+	SDL_RenderPresent(sdl_renderer);
 }
 
 void bx_sdl_gui_c::graphics_tile_update(u8* snapshot, unsigned x, unsigned y)
@@ -711,28 +346,20 @@ static u32 sdl_sym_to_bx_key(SDL_Keycode sym)
 
 void bx_sdl_gui_c::handle_events(void)
 {
-	// Only drain on the SDL thread (S3 still calls this — no-op for it).
-	if (!tls_is_sdl_thread)
-		return;
-
 	u32 key_event;
 
 	while (SDL_PollEvent(&sdl_event))
 	{
 		switch (sdl_event.type)
 		{
-		case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-			sdl_quit_requested.store(true, std::memory_order_release);
-			break;
-
 		case SDL_EVENT_WINDOW_EXPOSED:
-		case SDL_EVENT_WINDOW_RESIZED:
-		case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-			tb_dirty = true;
-			break;
-
-		case SDL_EVENT_WINDOW_MOUSE_LEAVE:
-			if (tb_hover != HIT_NONE) { tb_hover = HIT_NONE; tb_dirty = true; }
+			// Window needs redraw — re-present the current texture
+			if (sdl_renderer && sdl_texture)
+			{
+				SDL_RenderClear(sdl_renderer);
+				SDL_RenderTexture(sdl_renderer, sdl_texture, NULL, NULL);
+				SDL_RenderPresent(sdl_renderer);
+			}
 			break;
 
 		case SDL_EVENT_MOUSE_MOTION:
@@ -746,12 +373,6 @@ void bx_sdl_gui_c::handle_events(void)
 					theKeyboard->mouse_motion(dx, dy, 0, sdl_mouse_button_state);
 				}
 			}
-			else
-			{
-				HitTarget h = tb_hit_test((int)sdl_event.motion.x,
-				                          (int)sdl_event.motion.y);
-				if (h != tb_hover) { tb_hover = h; tb_dirty = true; }
-			}
 			break;
 
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -762,20 +383,7 @@ void bx_sdl_gui_c::handle_events(void)
 				if (sdl_event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
 					&& sdl_event.button.button == SDL_BUTTON_LEFT)
 				{
-					// Toolbar click: drive the controls. Otherwise it's a
-					// click in the VGA area — grab the mouse like before.
-					HitTarget h = tb_hit_test((int)sdl_event.button.x,
-					                          (int)sdl_event.button.y);
-					if (h != HIT_NONE)
-					{
-						if (theSystem && h == HIT_START) theSystem->RequestStart();
-						else if (theSystem && h == HIT_STOP) theSystem->RequestStop();
-						tb_dirty = true;
-					}
-					else if ((int)sdl_event.button.y >= TOOLBAR_H)
-					{
-						bx_gui->mouse_enabled_changed(true);
-					}
+					bx_gui->mouse_enabled_changed(true);
 				}
 				break;
 			}
@@ -798,7 +406,7 @@ void bx_sdl_gui_c::handle_events(void)
 			break;
 		}
 
-		case SDL_EVENT_MOUSE_WHEEL: // disabled for now, isn't working properly yet.
+		case SDL_EVENT_MOUSE_WHEEL: // disabled for now, isn't working properly yet. 
 /*			if (sdl_grab)
 			{
 				int dz = (int)sdl_event.wheel.y;  // positive = scroll up
@@ -882,7 +490,7 @@ void bx_sdl_gui_c::handle_events(void)
 				// hanlde dealing with ctrl+f10 escape
 				if (!(SDL_GetModState() & SDL_KMOD_CTRL))
 					sdl_swallow_keys = false;
-				break;
+				break;  
 			}
 
 			if (!myCfg->get_bool_value("keyboard.use_mapping", false))
@@ -913,8 +521,7 @@ void bx_sdl_gui_c::handle_events(void)
 			break;
 
 		case SDL_EVENT_QUIT:
-			sdl_quit_requested.store(true, std::memory_order_release);
-			break;
+			FAILURE(Graceful, "User requested shutdown");
 		}
 	}
 }
@@ -932,8 +539,12 @@ void bx_sdl_gui_c::flush(void)
  **/
 void bx_sdl_gui_c::clear_screen(void)
 {
-	std::lock_guard<std::mutex> lk(sdl_pending_mtx);
-	sdl_pending_clear = true;
+	if (!sdl_renderer)
+		return;
+
+	SDL_SetRenderDrawColor(sdl_renderer, 0, 0, 0, 255);
+	SDL_RenderClear(sdl_renderer);
+	SDL_RenderPresent(sdl_renderer);
 }
 
 /**
@@ -950,36 +561,99 @@ bool bx_sdl_gui_c::palette_change(unsigned index, unsigned red, unsigned green,
 void bx_sdl_gui_c::dimension_update(unsigned x, unsigned y, unsigned fheight,
 	unsigned fwidth, unsigned bpp)
 {
-	// Post the new dims; texture (re)creation happens on the SDL thread.
-	std::lock_guard<std::mutex> lk(sdl_pending_mtx);
-	if (sdl_texture_w == x && sdl_texture_h == y && !sdl_pending_dim)
+	if ((x == res_x) && (y == res_y) && sdl_window)
 		return;
-	sdl_pending_dim_w = x;
-	sdl_pending_dim_h = y;
-	sdl_pending_dim = true;
+
+	if (sdl_texture)
+	{
+		SDL_DestroyTexture(sdl_texture);
+		sdl_texture = NULL;
+	}
+
+	if (!sdl_window)
+	{
+		sdl_window = SDL_CreateWindow(sdl_title,
+			(int)x, (int)y, SDL_WINDOW_RESIZABLE);
+		if (!sdl_window)
+		{
+			FAILURE_3(SDL, "Unable to create SDL3 window: %ix%i: %s\n",
+				x, y, SDL_GetError());
+		}
+
+		sdl_renderer = SDL_CreateRenderer(sdl_window, NULL);
+		if (!sdl_renderer)
+		{
+			FAILURE_3(SDL, "Unable to create SDL3 renderer: %ix%i: %s\n",
+				x, y, SDL_GetError());
+		}
+
+		SDL_SetRenderLogicalPresentation(sdl_renderer,
+			(int)x, (int)y,
+			SDL_LOGICAL_PRESENTATION_LETTERBOX);
+	}
+	else
+	{
+		SDL_SetWindowSize(sdl_window, (int)x, (int)y);
+		SDL_SetRenderLogicalPresentation(sdl_renderer,
+			(int)x, (int)y,
+			SDL_LOGICAL_PRESENTATION_LETTERBOX);
+	}
+
+	sdl_texture = SDL_CreateTexture(sdl_renderer,
+		SDL_PIXELFORMAT_ARGB8888,
+		SDL_TEXTUREACCESS_STREAMING,
+		(int)x, (int)y);
+	if (!sdl_texture)
+	{
+		FAILURE_3(SDL, "Unable to create SDL3 texture: %ix%i: %s\n",
+			x, y, SDL_GetError());
+	}
+
+	SDL_SetTextureScaleMode(sdl_texture, SDL_SCALEMODE_NEAREST);
+
+	res_x = x;
+	res_y = y;
+	half_res_x = x / 2;
+	half_res_y = y / 2;
 }
 
 void bx_sdl_gui_c::mouse_enabled_changed_specific(bool val)
 {
-	// Defer SDL APIs (cursor, relative mouse, title) to the SDL thread.
-	// Flip sdl_grab now so a click later in the same iteration sees it.
+	if (val)
 	{
-		std::lock_guard<std::mutex> lk(sdl_pending_mtx);
-		sdl_pending_mouse_grab = val;
-		sdl_pending_mouse = true;
+		SDL_HideCursor();
+		if (sdl_window)
+		{
+			SDL_SetWindowRelativeMouseMode(sdl_window, true);
+			SDL_SetWindowTitle(sdl_window, sdl_title_grabbed);
+		}
 	}
-	sdl_grab = val ? 1 : 0;
+	else
+	{
+		SDL_ShowCursor();
+		if (sdl_window)
+		{
+			SDL_SetWindowRelativeMouseMode(sdl_window, false);
+			SDL_SetWindowTitle(sdl_window, sdl_title);
+		}
+	}
+
+	sdl_grab = val;
 }
 
 void bx_sdl_gui_c::exit(void)
 {
-	// Signal the SDL thread to wind down; SDL teardown happens at the end
-	// of its run() on the same thread that created the window.
-	sdl_thread_stop.store(true, std::memory_order_release);
-	if (sdl_thread) {
-		sdl_thread->join();
-		delete sdl_thread;
-		sdl_thread = nullptr;
+	if (sdl_texture) {
+		SDL_DestroyTexture(sdl_texture);
+		sdl_texture = NULL;
+	}
+	if (sdl_renderer) {
+		SDL_DestroyRenderer(sdl_renderer);
+		sdl_renderer = NULL;
+	}
+	if (sdl_window) {
+		SDL_DestroyWindow(sdl_window);
+		sdl_window = NULL;
 	}
 }
 

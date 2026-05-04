@@ -318,11 +318,6 @@
 #include "lockstep.h"
 #include "DPR.h"
 #include "Flash.h"
-#include "gui/gui.h"
-
-#if defined(HAVE_SDL)
-extern std::atomic<bool> sdl_quit_requested;   // src/gui/sdl.cpp
-#endif
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -410,11 +405,6 @@ CSystem::CSystem(CConfigurator* cfg)
 CSystem::~CSystem()
 {
 	int i;
-
-	// Stop the orchestration thread before tearing down components: the
-	// thread may otherwise be holding pointers (acComponents, acCPUs) that
-	// we are about to delete out from under it.
-	stop_orchestration();
 
 	printf("Freeing memory in use by system...\n");
 
@@ -595,19 +585,41 @@ void CSystem::Run()
 	{
 		if (got_sigint)
 			FAILURE(Graceful, "CTRL-C detected");
-#if defined(HAVE_SDL)
-		if (sdl_quit_requested.load(std::memory_order_acquire))
-			FAILURE(Graceful, "User closed main window");
-#endif
+
+		struct ResetInProgressGuard
+		{
+			CSystem* sys;
+			explicit ResetInProgressGuard(CSystem* s) : sys(s) { sys->SetResetInProgress(true); }
+			~ResetInProgressGuard() { sys->SetResetInProgress(false); }
+		};
+
+		if (m_reset_requested.exchange(false, std::memory_order_acq_rel))
+		{
+			printf("\n%%SYS-I-RESET: System reset requested by firmware.\n");
+			if (theSROM)
+				theSROM->FlushIfDirty();
+
+			ResetInProgressGuard rip(this);   // (right before stop_threads)
+
+			stop_threads();
+
+			ResetChipsetState();
+
+			for (int dev = 0; dev < iNumComponents; dev++)
+				acComponents[dev]->ResetPCI();
+
+			for (int cpu = 0; cpu < iNumCPUs; cpu++)
+				acCPUs[cpu]->ResetForSystemReset();
+
+			LoadROM();
+			start_threads();
+
+			// No explicit clear needed — guard destructor clears it
+			continue;
+		}
+
 
 		CThread::sleep(100); // 100ms sleep
-
-		// Skip the per-tick walk while stopped or while orch is mid-transition;
-		// the lock serializes us against do_machine_stop/start/reset.
-		std::lock_guard<std::recursive_mutex> orch_lk(m_orch_lock);
-		if (!m_machine_running.load(std::memory_order_acquire))
-			continue;
-
 		for (i = 0; i < iNumComponents; i++)
 			acComponents[i]->check_state();
 #if !defined(HIDE_COUNTER)
@@ -629,165 +641,11 @@ void CSystem::Run()
 void CSystem::RequestSystemReset()
 {
 	m_reset_requested.store(true, std::memory_order_release);
-	m_orch_cv.notify_one();
 }
 
 bool CSystem::IsSystemResetRequested() const
 {
 	return m_reset_requested.load(std::memory_order_acquire);
-}
-
-void CSystem::RequestStop()
-{
-	m_stop_requested.store(true, std::memory_order_release);
-	m_orch_cv.notify_one();
-}
-
-void CSystem::RequestStart()
-{
-	m_start_requested.store(true, std::memory_order_release);
-	m_orch_cv.notify_one();
-}
-
-// Orchestration thread: long-lived helper that handles Stop/Start/Reset
-// requests independently of the device thread set, so it can call
-// stop_threads() without self-join and works in IDB builds (where Run()
-// is never reached because the trace engine owns the main thread).
-
-void CSystem::start_orchestration()
-{
-	if (m_orch_thread) return;
-	m_orch_stop.store(false, std::memory_order_release);
-	m_orch_runner = new OrchRunner(this);
-	m_orch_thread = new CThread("orch");
-	m_orch_thread->start(*m_orch_runner);
-}
-
-void CSystem::stop_orchestration()
-{
-	if (!m_orch_thread) return;
-	m_orch_stop.store(true, std::memory_order_release);
-	m_orch_cv.notify_one();
-	m_orch_thread->join();
-	delete m_orch_thread;
-	m_orch_thread = nullptr;
-	delete m_orch_runner;
-	m_orch_runner = nullptr;
-
-	// Clear the pause flag so a subsequent stop_threads() actually joins S3
-	// (otherwise S3 paused-during-Stop would never get torn down).
-	SetResetInProgress(false);
-}
-
-void CSystem::orchestration_loop()
-{
-	while (!m_orch_stop.load(std::memory_order_acquire))
-	{
-		const bool running = m_machine_running.load(std::memory_order_acquire);
-
-		// Discard stale flags so a rapid click before the UI catches up
-		// doesn't get applied across the next transition.
-		if (running) m_start_requested.store(false, std::memory_order_release);
-		else         m_stop_requested.store(false, std::memory_order_release);
-
-		// Stop subsumes a pending reset (Start will reload ROM anyway).
-		if (running && m_stop_requested.exchange(false, std::memory_order_acq_rel))
-		{
-			m_reset_requested.store(false, std::memory_order_release);
-			do_machine_stop();
-			continue;
-		}
-
-		if (!running && m_start_requested.exchange(false, std::memory_order_acq_rel))
-		{
-			do_machine_start();
-			continue;
-		}
-
-		if (running && m_reset_requested.exchange(false, std::memory_order_acq_rel))
-		{
-			do_machine_reset();
-			continue;
-		}
-
-		// 100ms backstop in case a notify is missed (e.g. firmware reset
-		// paths that store the flag without going through Request*).
-		std::unique_lock<std::mutex> cv_lk(m_orch_cv_mtx);
-		m_orch_cv.wait_for(cv_lk, std::chrono::milliseconds(100), [this] {
-			return m_orch_stop.load(std::memory_order_acquire)
-				|| m_stop_requested.load(std::memory_order_acquire)
-				|| m_start_requested.load(std::memory_order_acquire)
-				|| m_reset_requested.load(std::memory_order_acquire);
-		});
-	}
-}
-
-void CSystem::do_machine_stop()
-{
-	printf("\n%%SYS-I-STOP: Machine stop requested.\n");
-
-	// Take the lock and flip running=false first so the IDB GO loop / Run()
-	// check_state walk halt before any (potentially slow) save runs.
-	std::lock_guard<std::recursive_mutex> orch_lk(m_orch_lock);
-
-	// Pin S3 in pump-only mode so the SDL window stays alive while the rest
-	// of the machine is torn down. Left set until Start clears it.
-	SetResetInProgress(true);
-	m_machine_running.store(false, std::memory_order_release);
-
-	if (theSROM) theSROM->SaveStateF();
-	if (theDPR)  theDPR->SaveStateF();
-
-	// Release mouse capture so the user can interact with the toolbar.
-	if (bx_gui) bx_gui->mouse_enabled_changed(false);
-
-	stop_threads();
-	ResetChipsetState();
-
-	for (int dev = 0; dev < iNumComponents; dev++)
-		acComponents[dev]->ResetPCI();
-
-	for (int cpu = 0; cpu < iNumCPUs; cpu++)
-		acCPUs[cpu]->ResetForSystemReset();
-}
-
-void CSystem::do_machine_start()
-{
-	printf("\n%%SYS-I-START: Machine start requested.\n");
-	std::lock_guard<std::recursive_mutex> orch_lk(m_orch_lock);
-	LoadROM();
-	start_threads();   // also clears m_reset_in_progress and sets running=true
-}
-
-void CSystem::do_machine_reset()
-{
-	printf("\n%%SYS-I-RESET: System reset requested by firmware.\n");
-	if (theSROM)
-		theSROM->FlushIfDirty();
-
-	std::lock_guard<std::recursive_mutex> orch_lk(m_orch_lock);
-
-	struct ResetInProgressGuard
-	{
-		CSystem* sys;
-		explicit ResetInProgressGuard(CSystem* s) : sys(s) { sys->SetResetInProgress(true); }
-		~ResetInProgressGuard() { sys->SetResetInProgress(false); }
-	};
-
-	ResetInProgressGuard rip(this);   // (right before stop_threads)
-
-	stop_threads();
-	ResetChipsetState();
-
-	for (int dev = 0; dev < iNumComponents; dev++)
-		acComponents[dev]->ResetPCI();
-
-	for (int cpu = 0; cpu < iNumCPUs; cpu++)
-		acCPUs[cpu]->ResetForSystemReset();
-
-	LoadROM();
-	start_threads();
-	// Guard destructor clears m_reset_in_progress
 }
 
 void CSystem::ResetChipsetState()
@@ -831,17 +689,6 @@ int CSystem::SingleStep()
 {
 	int i;
 	int result;
-
-#if defined(HAVE_SDL)
-	if (sdl_quit_requested.load(std::memory_order_acquire))
-		FAILURE(Graceful, "User closed main window");
-#endif
-
-	// Serialize against orch transitions; return 1 (signal GO break) if a
-	// Stop click has flipped the machine off.
-	std::lock_guard<std::recursive_mutex> orch_lk(m_orch_lock);
-	if (!m_machine_running.load(std::memory_order_acquire))
-		return 1;
 
 	for (i = 0; i < iNumCPUs; i++)
 		if (!acCPUs[i]->get_waiting())
@@ -2253,12 +2100,6 @@ int CSystem::LoadROM()
 	u32     scratch;
 	bool loadedFromFlash = false;
 
-	// SingleStep() gates on m_machine_running so the trace-engine GO loop
-	// breaks cleanly on Stop; LoadROM drives the firmware decompressor via
-	// SingleStep() and so needs the gate open. Subsequent start_threads()
-	// re-sets the same flag as a no-op.
-	m_machine_running.store(true, std::memory_order_release);
-
 	// If flash.rom contains a partitioned ES40 image (CPQ header at the SRM
 	// partition), execute its embedded self-decompressor to inflate the console
 	// into low RAM just like the cl67srmrom.exe path would.
@@ -2880,12 +2721,6 @@ void CSystem::start_threads()
 
 	for (i = 0; i < iNumCPUs; i++)
 		acCPUs[i]->release_threads();
-
-	// Clear any leftover pause-S3 state, mark running, and ensure the orch
-	// thread is up (idempotent — only the first call does real work).
-	SetResetInProgress(false);
-	m_machine_running.store(true, std::memory_order_release);
-	start_orchestration();
 }
 
 void CSystem::stop_threads()

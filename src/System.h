@@ -147,8 +147,6 @@
 #include "TraceEngine.h"
 #include "i2c_spd.h"
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
 
 #if !defined(INCLUDED_SYSTEM_H)
 #define INCLUDED_SYSTEM_H
@@ -285,51 +283,10 @@ public:
   void          RequestSystemReset();
   bool          IsSystemResetRequested() const;
 
-  // Toolbar Stop/Start: Stop tears down device threads (S3 stays paused so
-  // the window remains responsive) and resets chipset/CPU; Start reloads
-  // firmware and boots fresh.
-  void          RequestStop();
-  void          RequestStart();
-  bool          IsMachineRunning() const { return m_machine_running.load(std::memory_order_acquire); }
-
-  // Orchestration thread: handles Stop/Start/Reset requests. Idempotent —
-  // works in both Run() and IDB builds.
-  void          start_orchestration();
-  void          stop_orchestration();
-
 private:
   void          ResetChipsetState();
-  void          orchestration_loop();
-  void          do_machine_stop();
-  void          do_machine_start();
-  void          do_machine_reset();
-
   std::atomic<bool> m_reset_requested{ false };
   std::atomic<bool> m_reset_in_progress{ false };
-  std::atomic<bool> m_machine_running{ false };
-  std::atomic<bool> m_stop_requested{ false };
-  std::atomic<bool> m_start_requested{ false };
-  std::atomic<bool> m_orch_stop{ false };
-
-  // Serializes do_machine_stop/start/reset against Run()'s check_state walk
-  // and SingleStep(). Recursive because LoadROM() (called from orch under
-  // the lock) loops SingleStep() which also takes the lock.
-  std::recursive_mutex m_orch_lock;
-
-  // CV so a click is picked up immediately rather than after a 100ms poll.
-  std::mutex                m_orch_cv_mtx;
-  std::condition_variable   m_orch_cv;
-
-  // Nested CRunnable adaptor (CSystem can't derive from CRunnable — it
-  // already has Run()).
-  struct OrchRunner : public CRunnable
-  {
-    explicit OrchRunner(CSystem* s) : sys(s) {}
-    void run() override { sys->orchestration_loop(); }
-    CSystem* sys;
-  };
-  CThread*      m_orch_thread = nullptr;
-  OrchRunner*   m_orch_runner = nullptr;
   u64           cchip_csr_read(u32 address, CSystemComponent* source);
   void          cchip_csr_write(u32 address, u64 data, CSystemComponent* source);
   u64           pchip_csr_read(int num, u32 address);
