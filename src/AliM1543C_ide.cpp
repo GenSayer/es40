@@ -733,7 +733,7 @@ u32 CAliM1543C_ide::ide_command_read(int index, u32 address, int dsize)
 
 		// get the status and clear the interrupt.
 		data = get_status(index);
-		theAli->pic_deassert(1, 6 + index);
+		deassert_interrupt(index);
 #ifdef DEBUG_IDE_INTERRUPT
 		printf("%%IDE-I-INTERRUPT: Interrupt Acknowledged on %d.\n", index);
 #endif
@@ -850,7 +850,7 @@ void CAliM1543C_ide::ide_command_write(int index, u32 address, int dsize,
 		break;
 
 	case REG_COMMAND_COMMAND:
-		theAli->pic_deassert(1, 6 + index); // interrupt is cleared on write.
+		deassert_interrupt(index); // interrupt is cleared on write.
 		if (!SEL_DISK(index))
 		{
 #ifdef DEBUG_IDE
@@ -981,7 +981,9 @@ void CAliM1543C_ide::ide_control_write(int index, u32 address, u32 data)
 			CONTROLLER(index).reset_in_progress = true;
 			SEL_REGISTERS(index).error = 0x01;  // no error
 			COMMAND(index, 0).current_command = 0;
-			CONTROLLER(index).disable_irq = false;
+			// Do NOT force disable_irq=false here: the OS commonly writes
+			// SRST|nIEN (0x06) to suppress IRQs during reset.  Honor the
+			// nIEN bit the OS just programmed two lines above.
 		}
 		else if (prev_reset && !CONTROLLER(index).reset)
 		{
@@ -1010,16 +1012,40 @@ void CAliM1543C_ide::ide_control_write(int index, u32 address, u32 data)
 /**
  * Read from the IDE controller busmaster interface.
  **/
+u8 CAliM1543C_ide::ide_busmaster_status(int index)
+{
+	u8 status = CONTROLLER(index).busmaster[2] & 0x07;
+
+	if (usedma)
+	{
+		CDisk* drive0 = get_disk(index, 0);
+		CDisk* drive1 = get_disk(index, 1);
+
+		// ATAPI DMA is not reliable in this controller model: the worker can
+		// block in a packet phase while the guest is still waiting for BSY to
+		// drop. Keep disk DMA available, but present packet devices as PIO-only.
+		if (drive0 && !drive0->cdrom())
+			status |= 0x20;
+		if (drive1 && !drive1->cdrom())
+			status |= 0x40;
+	}
+
+	return status;
+}
+
 u32 CAliM1543C_ide::ide_busmaster_read(int index, u32 address, int dsize)
 {
 	u32 data = 0;
 	switch (dsize)
 	{
 	case 8:
+		if (address == 2)
+			CONTROLLER(index).busmaster[2] = ide_busmaster_status(index);
 		data = CONTROLLER(index).busmaster[address];
 		break;
 
 	case 32:
+		CONTROLLER(index).busmaster[2] = ide_busmaster_status(index);
 		data = *(u32*)(&CONTROLLER(index).busmaster[address]);
 		break;
 
@@ -1100,13 +1126,18 @@ void CAliM1543C_ide::ide_busmaster_write(int index, u32 address, u32 data,
 		// bit 2 = interrupt (write 1 to reset)
 		// bit 1 = error (write 1 to reset)
 		// bit 0 = busmaster active.
-		CONTROLLER(index).busmaster[2] = data & 0x67;
-		if (data & 0x04) // interrupt
-			CONTROLLER(index).busmaster[2] &= ~0x04;
-		if (data & 0x02) // error
-			CONTROLLER(index).busmaster[2] &= ~0x02;
-		if (data & 0x01) // busy
-			CONTROLLER(index).busmaster[2] &= ~0x01;
+		{
+			u8 status = CONTROLLER(index).busmaster[2];
+			if (data & 0x04) // interrupt
+				status &= ~0x04;
+			if (data & 0x02) // error
+				status &= ~0x02;
+			if (data & 0x01) // active; several ALi drivers write this to work around sticky active
+				status &= ~0x01;
+			CONTROLLER(index).busmaster[2] = (status & 0x07) | (ide_busmaster_status(index) & 0x60);
+			if ((data & 0x04) || (data & 0x01))
+				deassert_interrupt(index);
+		}
 		break;
 
 	case 4:           // descriptor table pointer register(s)
@@ -1173,14 +1204,35 @@ void CAliM1543C_ide::raise_interrupt(int index)
 #if !defined(IDE_YIELD_INTERRUPTS)
 		{
 			SCOPED_WRITE_LOCK(mtBusMaster[index]);
-			CONTROLLER(index).busmaster[2] |= 0x04;
+			if (CONTROLLER(index).busmaster[0] & 0x01)
+				CONTROLLER(index).busmaster[2] |= 0x04;
 		}
 		UPDATE_ALT_STATUS(index);
+		CONTROLLER(index).interrupt_pending = true;
 		theAli->pic_interrupt(1, 6 + index);
+		do_pci_interrupt(0, true);
 #else
 		CONTROLLER(index).interrupt_pending = true;
 #endif
 	}
+}
+
+void CAliM1543C_ide::deassert_interrupt(int index)
+{
+	bool keep_asserted = false;
+	{
+		SCOPED_READ_LOCK(mtBusMaster[index]);
+		keep_asserted =
+			(CONTROLLER(index).busmaster[2] & 0x04) &&
+			(CONTROLLER(index).busmaster[0] & 0x01);
+	}
+	if (keep_asserted)
+		return;
+
+	CONTROLLER(index).interrupt_pending = false;
+	theAli->pic_deassert(1, 6 + index);
+	if (!CONTROLLER(0).interrupt_pending && !CONTROLLER(1).interrupt_pending)
+		do_pci_interrupt(0, false);
 }
 
 u8 CAliM1543C_ide::get_status(int index)
@@ -1322,7 +1374,7 @@ void CAliM1543C_ide::identify_drive(int index, bool packet)
 	}
 	else
 	{
-		CONTROLLER(index).data[49] = 0x0b00;  // dma, iordy
+		CONTROLLER(index).data[49] = 0x0a00;  // iordy; packet devices are PIO-only
 	}
 
 	// capabilities (2)
@@ -1334,8 +1386,14 @@ void CAliM1543C_ide::identify_drive(int index, bool packet)
 	// validity:  bit 2 = #88 valid, 1 = 64-70 valid, 0 = 54-58 valid
 	CONTROLLER(index).data[53] = 7;
 
-	// geometry
-	CONTROLLER(index).data[54] = (u16)(SEL_DISK(index)->get_cylinders());
+	// geometry: word 54 is the "current" CHS cylinder count.  ATA/ATAPI-4
+	// caps it at 16383 just like word 1 — without the cap, a >=16384-cyl
+	// disk reports e.g. 0x4000 here while word 1 reports 0x3fff and NT
+	// logs "current CHS differs from default CHS".
+	{
+		u32 cyl = (u32)SEL_DISK(index)->get_cylinders();
+		CONTROLLER(index).data[54] = (u16)(cyl > 16383 ? 16383 : cyl);
+	}
 	CONTROLLER(index).data[55] = (u16)(SEL_DISK(index)->get_heads());
 	CONTROLLER(index).data[56] = (u16)(SEL_DISK(index)->get_sectors());
 	CONTROLLER(index).data[57] = (u16)
@@ -1361,7 +1419,7 @@ void CAliM1543C_ide::identify_drive(int index, bool packet)
 
 	// multiword dma capability (10-8: modes selected, 2-0, modes
 	// supported)
-	if (usedma)
+	if (usedma && !packet)
 		CONTROLLER(index).data[63] = CONTROLLER(index).dma_mode << 8 | 0x01;  // dma 0 supported
 	else
 		CONTROLLER(index).data[63] = CONTROLLER(index).dma_mode << 8 | 0x00;  // dma not supported
@@ -1872,8 +1930,7 @@ void CAliM1543C_ide::execute(int index)
 						SEL_COMMAND(index).packet_sense = 0;
 						SEL_COMMAND(index).packet_asc = 0;
 						SEL_COMMAND(index).packet_ascq = 0;
-						SEL_COMMAND(index).packet_dma =
-							(SEL_REGISTERS(index).features & 0x01) ? true : false;
+						SEL_COMMAND(index).packet_dma = false;
 						SEL_COMMAND(index).packet_phase = PACKET_DP1;
 
 						// we drop out of the thread and shut down the
@@ -2759,7 +2816,8 @@ void CAliM1543C_ide::run()
 				if (CONTROLLER(index).interrupt_pending) {
 					{
 						SCOPED_WRITE_LOCK(mtBusMaster[index]);
-						CONTROLLER(index).busmaster[2] |= 0x04;
+						if (CONTROLLER(index).busmaster[0] & 0x01)
+							CONTROLLER(index).busmaster[2] |= 0x04;
 					}
 					theAli->pic_interrupt(1, 6 + index);
 				}

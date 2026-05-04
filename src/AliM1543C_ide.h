@@ -203,11 +203,13 @@ private:
   void  ide_control_write(int channel, u32 address, u32 data);
   u32   ide_busmaster_read(int channel, u32 address, int dsize);
   void  ide_busmaster_write(int channel, u32 address, u32 data, int dsize);
+  u8    ide_busmaster_status(int channel);
   int   do_dma_transfer(int index, u8* buffer, u32 size, bool direction);
   u32   get_disk_lba(int index);
   void  advance_disk_address(int index, int sectors);
 
   void  raise_interrupt(int channel);
+  void  deassert_interrupt(int channel);
   void  set_signature(int channel, int id);
   u8    get_status(int index);
   void  command_aborted(int index, u8 command);
