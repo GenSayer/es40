@@ -70,7 +70,7 @@
 #undef DEBUG_FP_LOADSTORE
 
 // Define to 1 if you want to enable General NIC debugging
-#undef DEBUG_NIC
+//#define DEBUG_NIC
 
 // Define to 1 if you want to enable NIC Filter debugging
 #undef DEBUG_NIC_FILTER
@@ -81,8 +81,8 @@
 // Define if you want to enable unknown memory access debugging
 //#define DEBUG_UNKMEM
 
-// Define to 1 if you want to enable PCI debugging
-#undef DEBUG_PCI
+// Define if you want to enable PCI debugging
+//#define DEBUG_PCI
 
 // Define to 1 if you want to enable Translationbuffer debugging
 #undef DEBUG_TB
@@ -96,8 +96,8 @@
 // Define if you want EXTRA keyboard debugging
 //#define DEBUG_KBD_NOISY
 
-// Define to 1 if you want to enable Programmable Interrupt Controller (PIC) debugging
-#undef DEBUG_PIC
+// Define if you want to enable Programmable Interrupt Controller (PIC) debugging
+//#define DEBUG_PIC
 
 // Define to 1 if you want to enable Printer port debugging
 #undef DEBUG_LPT
@@ -118,8 +118,8 @@
 // Define if you want to enable Symbios SCRIPTS Execution debugging
 //#define DEBUG_SYM_SCRIPTS
 
-// Define to 1 if you want to enable DMA Controller debugging
-#undef DEBUG_DMA
+// Define to if you want to enable DMA Controller debugging
+//#define DEBUG_DMA
 
 // Define to 1 if you want to enable backtrace on SIGSEGV debugging
 #undef DEBUG_BACKTRACE
