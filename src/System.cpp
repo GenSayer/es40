@@ -380,6 +380,7 @@ CSystem::CSystem(CConfigurator* cfg)
 	state.tig.FwWrite = 0;
 	state.tig.HaltA = 0;
 	state.tig.HaltB = 0;
+	state.tig.ModInfo = 0;
 
 	if (iNumMemoryBits > 30)
 	{
@@ -677,6 +678,7 @@ void CSystem::ResetChipsetState()
 	state.tig.FwWrite = 0;
 	state.tig.HaltA = 0;
 	state.tig.HaltB = 0;
+	state.tig.ModInfo = 0;
 
 	memset(state.cf8_address, 0, sizeof(state.cf8_address));
 }
@@ -2028,7 +2030,7 @@ u8 CSystem::tig_read(u32 a)
 	case 0x30000040:  // smir
 		return state.tig.FwWrite;
 	case 0x30000100:  // mod_info
-		return 0;
+		return state.tig.ModInfo;
 	case 0x300003c0:  // ttcr
 		return state.tig.HaltA;
 	case 0x30000480:  // clr_pwr_flt_det
@@ -2053,10 +2055,7 @@ void CSystem::tig_write(u32 a, u8 data)
 		return;
 
 	case 0x30000100:  // mod_info
-		printf("Soft reset: %02x\n", data);
-		if (theSROM)
-			theSROM->FlushIfDirty();
-		RequestSystemReset();
+		state.tig.ModInfo = data;
 		return;
 
 	case 0x300003c0:  // ttcr
