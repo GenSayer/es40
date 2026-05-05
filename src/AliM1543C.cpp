@@ -368,8 +368,6 @@ void CAliM1543C::init()
 		printf("! CONFIGURATION WARNING ! vga_console set to true, but no VGA card installed.\n");
 		state.toy_stored_data[0x17] = 0;
 	}
-	
-	state.toy_stored_data[0x21] = 0xde; // platform-config descriptor. factory programmed. 
 
 	ResetPCI();
 
