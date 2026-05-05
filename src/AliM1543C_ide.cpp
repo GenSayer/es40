@@ -2651,6 +2651,8 @@ void CAliM1543C_ide::execute(int index)
 			/***
 				   * Special cases:  commands we don't support, but return success.
 				   ***/
+		case 0xde:    // door lock on removable drives
+		case 0xdf:    // door unlock on removable drives
 		case 0xe0:    // standby now
 		case 0xe1:    // idle immediate
 		case 0xe2:    // standby
