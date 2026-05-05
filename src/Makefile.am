@@ -54,6 +54,7 @@ AM_CPPFLAGS = -I$(top_srcdir)/src/emu
 es40_SOURCES = AliM1543C.cpp \
        AliM1543C_ide.cpp \
        AliM1543C_usb.cpp \
+       AliM1543C_pmu.cpp \
        AlphaCPU.cpp \
        AlphaCPU_ieeefloat.cpp \
        AlphaCPU_vaxfloat.cpp \
