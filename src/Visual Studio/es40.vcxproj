@@ -1455,6 +1455,7 @@
     <ClCompile Include="..\AliM1543C.cpp" />
     <ClCompile Include="..\AliM1543C_ide.cpp" />
     <ClCompile Include="..\AliM1543C_usb.cpp" />
+    <ClCompile Include="..\AliM1543C_pmu.cpp" />
     <ClCompile Include="..\AlphaCPU.cpp" />
     <ClCompile Include="..\AlphaCPU_ieeefloat.cpp" />
     <ClCompile Include="..\AlphaCPU_vaxfloat.cpp" />
@@ -1506,6 +1507,7 @@
     <ClInclude Include="..\AliM1543C.h" />
     <ClInclude Include="..\AliM1543C_ide.h" />
     <ClInclude Include="..\AliM1543C_usb.h" />
+    <ClInclude Include="..\AliM1543C_pmu.h" />
     <ClInclude Include="..\AlphaCPU.h" />
     <ClInclude Include="..\attotime.h" />
     <ClInclude Include="..\base\Exception.h" />

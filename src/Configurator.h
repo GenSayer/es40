@@ -102,6 +102,7 @@ typedef enum
   c_ali,
   c_ali_ide,
   c_ali_usb,
+  c_ali_pmu,
   c_s3,
   c_cirrus,
   c_radeon,

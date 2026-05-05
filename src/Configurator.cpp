@@ -135,6 +135,7 @@
 #include "DMA.h"
 #include "AliM1543C_ide.h"
 #include "AliM1543C_usb.h"
+#include "AliM1543C_pmu.h"
 #include "DiskFile.h"
 #include "DiskDevice.h"
 #include "DiskRam.h"
@@ -694,6 +695,7 @@ classinfo classes[] = {
   {"ali", c_ali, IS_PCI | HAS_ISA},
   {"ali_ide", c_ali_ide, IS_PCI | HAS_DISK},
   {"ali_usb", c_ali_usb, IS_PCI},
+  {"ali_pmu", c_ali_pmu, IS_PCI},
   {"serial", c_serial, ON_CS},
   {"s3", c_s3, IS_PCI | ON_GUI},
   //{"cirrus", c_cirrus, IS_PCI | ON_GUI},
@@ -870,6 +872,11 @@ void CConfigurator::initialize()
 
 	case c_ali_usb:
 		myDevice = new CAliM1543C_usb(this, (CSystem*)pParent->get_device(),
+			pcibus, pcidev);
+		break;
+
+	case c_ali_pmu:
+		myDevice = new CAliM1543C_pmu(this, (CSystem*)pParent->get_device(),
 			pcibus, pcidev);
 		break;
 
