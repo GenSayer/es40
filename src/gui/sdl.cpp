@@ -121,7 +121,7 @@ public:
 	void			graphics_frame_update(const u32* pixels, unsigned w, unsigned h) override;
 private:
 	CConfigurator* myCfg;
-	bool           vid_linear = false;
+	bool           vid_linear = true;
 };
 
 // declare one instance of the gui object and call macro to insert the
@@ -175,7 +175,7 @@ void bx_sdl_gui_c::specific_init(unsigned x_tilesize, unsigned y_tilesize)
 		bx_keymap->loadKeymap(convertStringToSDLKey);
 	}
 
-	this->vid_linear = myCfg->get_bool_value("video.linear", false);
+	this->vid_linear = myCfg->get_bool_value("video.linear", true);
 
 	new_gfx_api = 1;
 }
