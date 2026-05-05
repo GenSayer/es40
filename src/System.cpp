@@ -867,7 +867,6 @@ void CSystem::WriteMem(u64 address, int dsize, u64 data, CSystemComponent* sourc
 
 	if (a >> iNumMemoryBits) // non-memory
 	{
-
 		// check registered device memory ranges
 		for (i = 0; i < iNumMemories; i++)
 		{
@@ -1111,7 +1110,6 @@ u64 CSystem::ReadMem(u64 address, int dsize, CSystemComponent* source)
 	a = address & U64(0x00000807ffffffff);
 	if (a >> iNumMemoryBits) // Non Memory
 	{
-
 		// check registered device memory ranges
 		for (i = 0; i < iNumMemories; i++)
 		{

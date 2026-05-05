@@ -149,6 +149,7 @@
 #endif
 #include "Sym53C895.h"
 #include "Sym53C810.h"
+#include "MPU401.h"
 
   /**
    * Constructor.
@@ -709,6 +710,7 @@ classinfo classes[] = {
   {"sdl", c_sdl, N_P | IS_GUI},
   {"win32", c_sdl, N_P | IS_GUI},
   {"X11", c_x11, N_P | IS_GUI},
+  {"mpu401", c_mpu401, ON_CS },
   {0, c_none, 0}
 };
 
@@ -874,6 +876,12 @@ void CConfigurator::initialize()
 		myDevice = new CAliM1543C_usb(this, (CSystem*)pParent->get_device(),
 			pcibus, pcidev);
 		break;
+
+#ifdef _WIN32
+	case c_mpu401:
+		myDevice = (void*)new CMPU401(this, (CSystem*)pParent->get_device());
+		break;
+#endif
 
 	case c_ali_pmu:
 		myDevice = new CAliM1543C_pmu(this, (CSystem*)pParent->get_device(),

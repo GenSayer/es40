@@ -1465,6 +1465,7 @@
     <ClCompile Include="..\Cirrus.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="..\MPU401.cpp" />
     <ClCompile Include="..\Configurator.cpp" />
     <ClCompile Include="..\DEC21143.cpp" />
     <ClCompile Include="..\Disk.cpp" />
@@ -1562,6 +1563,7 @@
     <ClInclude Include="..\lockstep.h" />
     <ClInclude Include="..\logmacro.h" />
     <ClInclude Include="..\mame_shims.h" />
+    <ClInclude Include="..\MPU401.h" />
     <ClInclude Include="..\PCIDevice.h" />
     <ClInclude Include="..\gui\plugin.h" />
     <ClInclude Include="..\Port80.h" />

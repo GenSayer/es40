@@ -109,6 +109,7 @@ typedef enum
   c_dec21143,
   c_sym53c895,
   c_sym53c810,
+  c_mpu401,
 
   // disk devices
   c_file,
