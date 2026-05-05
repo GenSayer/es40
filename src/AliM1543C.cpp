@@ -294,11 +294,22 @@ u32   ali_cfg_data[64] = {
 	/*34*/ 0x00000000,  // CCAP: capabilities pointer
 	/*38*/ 0x00000000,
 	/*3c*/ 0x00000000,  // CFIT: interrupt configuration
-	0, 0, 0, 0, 0,
-	/*54*/ 0x00000200,  //
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+	/*40*/ 0x00000000,
+	// 0x44 byte = IDENRI (IDE channel 0 IRQ route).  0x0d → IRQ 14.
+	/*44*/ 0x0000000d,
+	/*48*/ 0x00000000,  // PIRT[A:D] PCI INTx route — programmed by firmware
+	/*4c*/ 0x00000000,
+	/*50*/ 0x00000000,
+	/*54*/ 0x00000200,
+	/*58*/ 0x00000000,
+	/*5c*/ 0x00000000, /*60*/ 0x00000000, /*64*/ 0x00000000,
+	/*68*/ 0x00000000, /*6c*/ 0x00000000, /*70*/ 0x00000000,
+	// 0x74 byte = USBIR (USB IRQ route),       0x03 → IRQ 10
+	// 0x75 byte = IDENRII (IDE chan 1 route),  0x0f → IRQ 15
+	// 0x76 byte = SCIIR (SCI route),           0x00 → disabled at reset
+	// 0x77 byte = SMBIR (SMBus / SCI route),   0x01 → IRQ  9
+	/*74*/ 0x01000f03,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
 u32   ali_cfg_mask[64] = {
@@ -318,16 +329,24 @@ u32   ali_cfg_mask[64] = {
 	/*34*/ 0x00000000,  // CCAP: capabilities pointer
 	/*38*/ 0x00000000,
 	/*3c*/ 0x00000000,  // CFIT: interrupt configuration
+	// Chipset-config wmask.  Byte-granular bits set here mark each PCI-config
+	// byte as OS-writable; bits left clear are read-only.  Without writable
+	// bits in 0x5c-0x77, AlphaBIOS's writes to USB / IDE-1 / SCI / SMBus IRQ
+	// route bytes are silently dropped and the table-build path produces
+	// wrong IRQ-routing data.
 	/*40*/ 0xffcfff7f,
 	/*44*/ 0xff00cbdf,
-	/*48*/ 0xffffffff,
+	/*48*/ 0xffffffff, // PIRT[A:D]
 	/*4c*/ 0x000000ff,
-	/*50*/ 0xffff8fff,
-	/*54*/ 0xf0ffff00,
-	/*58*/ 0x030f0d7f,
-	0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+	/*50*/ 0xcfff8fff,
+	/*54*/ 0xe0ffff00,
+	/*58*/ 0x020f0d7f,
+	/*5c*/ 0xffe0027f,
+	/*60*/ 0x00000000, /*64*/ 0x00000000, /*68*/ 0x00000000,
+	/*6c*/ 0x00ffbf00,
+	/*70*/ 0xffefefff,
+	/*74*/ 0x1fcf1fdf, // USBIR / IDENRII / SCIIR / SMBIR
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
 /**
