@@ -482,7 +482,7 @@ bool CPCIDevice::do_pci_interrupt(int func, bool asserted)
 	const u32 cfit = endian_32(pci_state.config_data[func][0x0f]);
 	const u8  line = cfit & 0xff;
 	const u8  pin  = (cfit >> 8) & 0xff;
-	if (pin == 0 || line == 0xff)
+	if (pin == 0)
 		return false;
 
 	const int intx       = (pin - 1) & 0x3;
