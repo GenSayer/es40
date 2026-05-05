@@ -84,6 +84,9 @@
 // Define if you want to enable PCI debugging
 //#define DEBUG_PCI
 
+// Define if you want to enable PCI IRQ debugging
+//#define DEBUG_PCI_IRQ
+
 // Define to 1 if you want to enable Translationbuffer debugging
 #undef DEBUG_TB
 
@@ -104,6 +107,9 @@
 
 // Define to 1 if you want to enable USB Controller debugging
 #undef DEBUG_USB
+
+// Define if you want to enable Power Management Unit (M7101) debugging
+//#define DEBUG_PMU
 
 // Define if you want to enable SCSI Device debugging
 //#define DEBUG_SCSI
@@ -151,6 +157,9 @@
 
 // Define if you want to enable ISA Plug-and-Play (ports 0x279 / 0xA79) debugging
 //#define DEBUG_ISAPNP
+
+// Define if you want to enable PMU debugging
+//#define DEBUG_PMU
 
 // Working on VGA rendering for graphical components
 //#define DEBUG_VGA_RENDER
