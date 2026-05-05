@@ -462,22 +462,41 @@ void CPCIDevice::WriteMem(int index, u64 address, int dsize, u64 data)
 
 bool CPCIDevice::do_pci_interrupt(int func, bool asserted)
 {
-	const u8 line = endian_32(pci_state.config_data[func][0x0f]) & 0xff;
-	if (line != 0xff)
-	{
-		// IRQ Line is the byte SRM/firmware programmed at config offset 0x3C.
-		// On Tsunami it's the DRIR bit number (0-55) for the PCI INTx that this
-		// device asserts. Trace each transition so we can identify any device
-		// whose IRQ never gets cleared during guest boot.
-#ifdef DEBUG_PCI_IRQ
-		printf("PCI-IRQ: %s.%d %s line=0x%02x (DRIR bit %d)\n",
-			devid_string, func, asserted ? "ASSERT  " : "DEASSERT", line, line & 0x3f);
-#endif
-		cSystem->interrupt(line, asserted);
-		return true;
-	}
-	else
+	// Per Tsunami HRM section 6.3, the 64 TIGbus interrupt inputs (DRIR
+	// bits 0-63) are board-wired to PCI INTx pins.  ES40 uses the slot-
+	// based pattern SRM programs at first pass:
+	//   DRIR_bit = ((slot + 1) * 4 + bus * 0x10 + (pin - 1)) & 0x3f.
+	//
+	// Two gates the cfg-space CFIT longword tells us:
+	//   - Pin (cfg+0x3D) selects which INTx (1=A, 2=B, 3=C, 4=D); 0 means
+	//     the device declares no INTx capability and we early-return.
+	//   - Line (cfg+0x3C) == 0xFF is PCI spec's "no IRQ assigned" — that's
+	//     also the reset value, so it doubles as "SRM has not configured
+	//     this device's IRQ yet".  Honouring it prevents firing INTx into
+	//     the OS during the pre-bootstrap window where exception handlers
+	//     aren't installed yet (OpenVMS in particular crashes hard with
+	//     ACV through vector 0x80 if INTx delivers in that window).
+	//
+	// Once a real value lands in Line (any 8-bit value < 0xFF), we ignore
+	// it and use the slot formula instead
+	const u32 cfit = endian_32(pci_state.config_data[func][0x0f]);
+	const u8  line = cfit & 0xff;
+	const u8  pin  = (cfit >> 8) & 0xff;
+	if (pin == 0 || line == 0xff)
 		return false;
+
+	const int intx       = (pin - 1) & 0x3;
+	const int slot       = myPCIDev & 0x1f;
+	const int bus_offset = (myPCIBus & 0x3) * 0x10;
+	const int drir_bit   = ((slot + 1) * 4 + bus_offset + intx) & 0x3f;
+
+#ifdef DEBUG_PCI_IRQ
+	printf("PCI-IRQ: %s.%d %s line=0x%02x pin=%d slot=%d bus=%d -> DRIR bit %d\n",
+		devid_string, func, asserted ? "ASSERT  " : "DEASSERT",
+		line, pin, myPCIDev, myPCIBus, drir_bit);
+#endif
+	cSystem->interrupt(drir_bit, asserted);
+	return true;
 }
 
 static u32  pci_magic1 = 0xC1095A78;
