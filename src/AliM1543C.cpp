@@ -379,6 +379,7 @@ void CAliM1543C::init()
 		state.toy_access_ports[i] = 0;
 	for (i = 0; i < 256; i++)
 		state.toy_stored_data[i] = 0;
+	state.toy_offset = 0;
 
 	state.toy_stored_data[0x17] = myCfg->get_bool_value("vga_console") ? 1 : 0;
 
@@ -1094,7 +1095,7 @@ u8 CAliM1543C::isapnp_data_read(u32 /*address*/)
 u8 CAliM1543C::toy_read(u32 address)
 {
 
-	//printf("%%ALI-I-READTOY: read port %02x: 0x%02x\n", (u32)(0x70 + address), state.toy_access_ports[address]);
+	printf("%%ALI-I-READTOY: read port %02x: 0x%02x\n", (u32)(0x70 + address), state.toy_access_ports[address]);
 	return(u8)state.toy_access_ports[address];
 }
 
@@ -1108,18 +1109,19 @@ void CAliM1543C::toy_write(u32 address, u8 data)
 	static long read_count = 0;
 	static long hold_count = 0;
 
-	//printf("%%ALI-I-WRITETOY: write port %02x: 0x%02x\n", (u32)(0x70 + address), data);
+	printf("%%ALI-I-WRITETOY: write port %02x: 0x%02x\n", (u32)(0x70 + address), data);
 	state.toy_access_ports[address] = (u8)data;
 
 	switch (address)
 	{
 	case 0:
-		if ((data & 0x7f) < 14)
+		if ((data & 0x7f) < 14 && !(state.toy_stored_data[0x0b] & 0x80))
 		{
 			state.toy_stored_data[0x0d] = 0x80;   // data is geldig!
 
 			// update clock.......
 			time(&ltime);
+			ltime += state.toy_offset;
 			gmtime_s(&stime, &ltime);
 			if (state.toy_stored_data[0x0b] & 4)
 			{
@@ -1277,6 +1279,47 @@ void CAliM1543C::toy_write(u32 address, u8 data)
 	case 1:
 		if (state.toy_access_ports[0] == 0x0b && data & 0x040) // If we're writing to register B, we make register C look like it fired.
 			state.toy_stored_data[0x0c] = 0xf0;
+		// On REG_B SET 1->0 transition, snapshot the just-written time/date
+		// registers and compute an offset from host time so the value sticks
+		// after SET goes low.  Without this, the regen path overwrites the
+		// user's writes on the next port-70h poke.
+		if (state.toy_access_ports[0] == 0x0b
+			&& (state.toy_stored_data[0x0b] & 0x80)
+			&& !(data & 0x80))
+		{
+			bool binary = (data & 0x04) != 0;
+			bool h24    = (data & 0x02) != 0;
+
+			u8 ss  = state.toy_stored_data[0];
+			u8 mm  = state.toy_stored_data[2];
+			u8 hh  = state.toy_stored_data[4];
+			u8 dd  = state.toy_stored_data[7];
+			u8 mo  = state.toy_stored_data[8];
+			u8 yy  = state.toy_stored_data[9];
+
+			bool pm = false;
+			if (!h24) { pm = (hh & 0x80) != 0; hh &= 0x7f; }
+
+			auto unbcd = [](u8 v) -> int { return ((v >> 4) & 0x0f) * 10 + (v & 0x0f); };
+
+			struct tm st = {};
+			st.tm_sec  = binary ? ss : unbcd(ss);
+			st.tm_min  = binary ? mm : unbcd(mm);
+			st.tm_hour = binary ? hh : unbcd(hh);
+			st.tm_mday = binary ? dd : unbcd(dd);
+			st.tm_mon  = (binary ? mo : unbcd(mo)) - 1;
+			st.tm_year = binary ? yy : unbcd(yy);
+			if (st.tm_year < 70) st.tm_year += 100;   // 20XX pivot
+
+			if (!h24 &&  pm && st.tm_hour < 12) st.tm_hour += 12;
+			if (!h24 && !pm && st.tm_hour == 12) st.tm_hour = 0;
+
+			time_t set_time = _mkgmtime(&st);
+			time_t host_now;
+			time(&host_now);
+			if (set_time != (time_t)-1)
+				state.toy_offset = (long)(set_time - host_now);
+		}
 		state.toy_stored_data[state.toy_access_ports[0] & 0x7f] = (u8)data;
 		break;
 

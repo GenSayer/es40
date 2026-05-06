@@ -247,6 +247,7 @@ private:
     // REGISTERS 70 - 73: TOY
     u8    toy_stored_data[256];
     u8    toy_access_ports[4];
+    long  toy_offset;               // seconds: (user-set time) - (host time)
 
     // Timer/Counter
     u32   pit_counter[9];
