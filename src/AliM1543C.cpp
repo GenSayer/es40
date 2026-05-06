@@ -1095,7 +1095,7 @@ u8 CAliM1543C::isapnp_data_read(u32 /*address*/)
 u8 CAliM1543C::toy_read(u32 address)
 {
 
-	printf("%%ALI-I-READTOY: read port %02x: 0x%02x\n", (u32)(0x70 + address), state.toy_access_ports[address]);
+	//printf("%%ALI-I-READTOY: read port %02x: 0x%02x\n", (u32)(0x70 + address), state.toy_access_ports[address]);
 	return(u8)state.toy_access_ports[address];
 }
 
@@ -1109,7 +1109,7 @@ void CAliM1543C::toy_write(u32 address, u8 data)
 	static long read_count = 0;
 	static long hold_count = 0;
 
-	printf("%%ALI-I-WRITETOY: write port %02x: 0x%02x\n", (u32)(0x70 + address), data);
+	//printf("%%ALI-I-WRITETOY: write port %02x: 0x%02x\n", (u32)(0x70 + address), data);
 	state.toy_access_ports[address] = (u8)data;
 
 	switch (address)
