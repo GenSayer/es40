@@ -491,7 +491,9 @@ CDEC21143::~CDEC21143()
 {
 	stop_threads();
 
-	pcap_close(fp);
+	if (fp != nullptr) {
+		pcap_close(fp);
+	}
 	delete rx_queue;
 	/* Free TX scratch on device teardown (not on ResetNIC, which expects it alive). */
 	if (state.tx.cur_buf) {
