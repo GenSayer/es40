@@ -467,7 +467,7 @@ int main(int argc, char* argv[])
 	mhz_q.setQuestion("What should the reported speed of the CPU's be in MHz?");
 	mhz_q.setExplanation("This only changes the CPU speed reported to the OS; not the speed of the emulation.");
 	mhz_q.setRange(10, 1250);
-	mhz_q.setDefault("800");
+	mhz_q.setDefault("500");
 
 	mhz_q.ask();
 
@@ -666,11 +666,11 @@ int main(int argc, char* argv[])
 		rom_q.setQuestion("Where can the VGA BIOS ROM image be found?");
 		rom_q.setExplanation("This file is required.");
 #if defined(_WIN32)
-		rom_q.setDefault("rom\\vgabios-0.6a.bin");
+		rom_q.setDefault("rom\\CHANGE_ME_TO_CORRECT_VGA_BIOS_FOR_SELECTED_CARD_NOT_VGABIOS-0.6a.bin");
 #elif defined(__VMS)
-		rom_q.setDefault("[.ROM]VGABIOS_0_6A.BIN");
+		rom_q.setDefault("[.ROM]CHANGE_ME_TO_CORRECT_VGA_BIOS_FOR_SELECTED_CARD_NOT_VGABIOS-0.6a.bin");
 #else
-		rom_q.setDefault("rom/vgabios-0.6a.bin");
+		rom_q.setDefault("rom/CHANGE_ME_TO_CORRECT_VGA_BIOS_FOR_SELECTED_CARD_NOT_VGABIOS-0.6a.bin");
 #endif
 
 		os << "  " << pci_q.ask() << " = " << vga_q.getAnswer() << "\n";
