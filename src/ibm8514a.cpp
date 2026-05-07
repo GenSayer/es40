@@ -863,8 +863,8 @@ uint16_t ibm8514a_device::ibm8514_desty_r()
 
 void ibm8514a_device::ibm8514_desty_w(uint16_t data)
 {
-	ibm8514.line_axial_step = data;
-	ibm8514.dest_y = data;
+	ibm8514.line_axial_step = data & 0x3fff;
+	ibm8514.dest_y = data & 0x0fff;
 	LOG("8514/A: Line Axial Step / Destination Y write %04x\n", data);
 }
 
@@ -888,8 +888,8 @@ uint16_t ibm8514a_device::ibm8514_destx_r()
 
 void ibm8514a_device::ibm8514_destx_w(uint16_t data)
 {
-	ibm8514.line_diagonal_step = data;
-	ibm8514.dest_x = data;
+	ibm8514.line_diagonal_step = data & 0x3fff;
+	ibm8514.dest_x = data & 0x0fff;
 	LOG("8514/A: Line Diagonal Step / Destination X write %04x\n", data);
 }
 

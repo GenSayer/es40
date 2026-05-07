@@ -1726,7 +1726,7 @@ void CS3Trio64::mem_w(offs_t offset, uint8_t data)
 		case 0x8109:
 		case 0x8ae9:
 			dev->ibm8514.line_axial_step = (dev->ibm8514.line_axial_step & 0x00ff) | ((data & 0x3f) << 8);
-			dev->ibm8514.dest_y = (dev->ibm8514.dest_y & 0x00ff) | (data << 8);
+			dev->ibm8514.dest_y = (dev->ibm8514.dest_y & 0x00ff) | ((data & 0x0f) << 8);
 			break;
 		case 0x810a:
 		case 0x8ee8:
@@ -1736,7 +1736,7 @@ void CS3Trio64::mem_w(offs_t offset, uint8_t data)
 		case 0x810b:
 		case 0x8ee9:
 			dev->ibm8514.line_diagonal_step = (dev->ibm8514.line_diagonal_step & 0x00ff) | ((data & 0x3f) << 8);
-			dev->ibm8514.dest_x = (dev->ibm8514.dest_x & 0x00ff) | (data << 8);
+			dev->ibm8514.dest_x = (dev->ibm8514.dest_x & 0x00ff) | ((data & 0x0f) << 8);
 			break;
 		case 0x8118:
 		case 0x9ae8:
@@ -2408,10 +2408,10 @@ void CS3Trio64::init()
 	// runtime gating is done via CR40 (state.accel.enabled).
 	add_legacy_io(10, 0x42E8, 2); // SUBSYS_CNTL/STAT
 	add_legacy_io(11, 0x4AE8, 2); // ADVFUNC_CNTL
-	add_legacy_io(12, 0x46E8, 2); // CUR_X
-	add_legacy_io(13, 0x4EE8, 2); // CUR_Y
-	add_legacy_io(14, 0x86E8, 2); // DEST_X
-	add_legacy_io(15, 0x8EE8, 2); // DEST_Y/AXSTP
+	add_legacy_io(12, 0x46E8, 2); // MODE_SETUP / video subsystem enable
+	add_legacy_io(13, 0x4EE8, 2); // legacy compatibility stub
+	add_legacy_io(14, 0x86E8, 2); // CUR_X
+	add_legacy_io(15, 0x8EE8, 2); // DESTX_DIASTP
 	add_legacy_io(16, 0x96E8, 2); // MAJ_AXIS_PCNT
 	add_legacy_io(17, 0x9AE8, 2); // CMD
 	add_legacy_io(18, 0xA2E8, 2); // BKGD_COLOR
@@ -2426,8 +2426,9 @@ void CS3Trio64::init()
 	add_legacy_io(27, 0xD2E8, 2); // ROP_MIX       (word; some paths read this)
 	add_legacy_io(28, 0x9EE8, 2); // SHORT_STROKE  (word; latch)
 	add_legacy_io(29, 0xCAE8, 2); // DESTY/AXSTP alias (might be wrong)
-	add_legacy_io(30, 0x82E8, 2);  // CUR_Y 
-	add_legacy_io(31, 0x92E8, 2);  // ERR_TERM 
+	add_legacy_io(30, 0x82E8, 2); // CUR_Y
+	add_legacy_io(31, 0x92E8, 2); // ERR_TERM
+	add_legacy_io(33, 0x8AE8, 2); // DESTY_AXSTP
 
 
 	/* The VGA BIOS we use sends text messages to port 0x500.
@@ -3000,6 +3001,9 @@ u32 CS3Trio64::ReadMem_Legacy(int index, u32 address, int dsize)
 	case 27: data = io_read(address + 0xD2E8, dsize); break;
 	case 28: data = io_read(address + 0x9EE8, dsize); break;
 	case 29: data = io_read(address + 0xCAE8, dsize); break;
+	case 30: data = io_read(address + 0x82E8, dsize); break;
+	case 31: data = io_read(address + 0x92E8, dsize); break;
+	case 33: data = io_read(address + 0x8AE8, dsize); break;
 
 	case 32:
 		data = io_read(address + 0x102, dsize);
@@ -3082,6 +3086,9 @@ void CS3Trio64::WriteMem_Legacy(int index, u32 address, int dsize, u32 data)
 	case 27: io_write(address + 0xD2E8, dsize, data); break;
 	case 28: io_write(address + 0x9EE8, dsize, data); break;
 	case 29: io_write(address + 0xCAE8, dsize, data); break;
+	case 30: io_write(address + 0x82E8, dsize, data); break;
+	case 31: io_write(address + 0x92E8, dsize, data); break;
+	case 33: io_write(address + 0x8AE8, dsize, data); break;
 
 	case 32:
 		io_write(address + 0x102, dsize, data);
@@ -3229,7 +3236,7 @@ void CS3Trio64::AccelIOWrite(u32 port, u8 data)
 		}
 		else {
 			dev->ibm8514.line_axial_step = (dev->ibm8514.line_axial_step & 0x00ff) | ((data & 0x3f) << 8);
-			dev->ibm8514.dest_y = (dev->ibm8514.dest_y & 0x00ff) | (data << 8);
+			dev->ibm8514.dest_y = (dev->ibm8514.dest_y & 0x00ff) | ((data & 0x0f) << 8);
 		}
 		break;
 
@@ -3249,7 +3256,7 @@ void CS3Trio64::AccelIOWrite(u32 port, u8 data)
 		}
 		else {
 			dev->ibm8514.line_diagonal_step = (dev->ibm8514.line_diagonal_step & 0x00ff) | ((data & 0x3f) << 8);
-			dev->ibm8514.dest_x = (dev->ibm8514.dest_x & 0x00ff) | (data << 8);
+			dev->ibm8514.dest_x = (dev->ibm8514.dest_x & 0x00ff) | ((data & 0x0f) << 8);
 		}
 		break;
 
@@ -3398,9 +3405,11 @@ bool CS3Trio64::IsAccelPort(u32 p) const {
 	case 0x42E8: // SUBSYS_CNTL / SUBSYS_STAT (w/r)
 	case 0x4AE8: // ADVFUNC_CNTL
 		// coordinates
-	case 0x4EE8: // CUR_Y
-	case 0x86E8: // DESTX
-	case 0x8EE8: // DESTY / AXSTP (S3 encodes AXSTP here)
+	case 0x4EE8: // legacy compatibility stub
+	case 0x82E8: // CUR_Y
+	case 0x86E8: // CUR_X
+	case 0x8AE8: // DESTY_AXSTP
+	case 0x8EE8: // DESTX_DIASTP
 	case 0xCAE8: // DESTY / AXSTP alias (seen in 86Box mappings)
 		// dimensions / count
 	case 0x96E8: // MAJ_AXIS_PCNT
@@ -3418,7 +3427,6 @@ bool CS3Trio64::IsAccelPort(u32 p) const {
 	case 0x9D48: // SSV (older window alias)
 	case 0xB2E8: // COLOR_CMP (Color Compare register)
 	case 0x9AE8: // CMD
-	case 0x82E8:
 	case 0x92E8:
 		return true;
 	default:
