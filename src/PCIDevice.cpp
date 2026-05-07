@@ -88,6 +88,13 @@
 
 #define DEBUG_PCI 0
 
+static size_t pci_dma_chunk_limit(u64 phys_addr, size_t remaining)
+{
+	const size_t dma_page = 8192;
+	size_t page_remaining = dma_page - (size_t)(phys_addr & (dma_page - 1));
+	return (remaining < page_remaining) ? remaining : page_remaining;
+}
+
 CPCIDevice::CPCIDevice(CConfigurator* cfg, CSystem* c, int pcibus, int pcidev) : CSystemComponent(cfg, c)
 {
 	int i;
@@ -651,17 +658,35 @@ void CPCIDevice::do_pci_read(u32 address, void* dest, size_t element_size,
 	if (element_size == 1)
 	{
 #endif
+		size_t remaining = element_size * element_count;
+		u32 cur_address = address;
 
-		// get a pointer to system memory if the address is inside main memory
-		char* memptr = cSystem->PtrToMem(phys_addr);
-
-		// if the address is inside system memory, a simple memcpy operation is
-		// all that is needed.
-		if (memptr)
+		while (remaining != 0)
 		{
-			memcpy(dest, memptr, element_size * element_count);
-			return;
+			u64 cur_phys = cSystem->PCI_Phys(myPCIBus, cur_address);
+			size_t chunk = pci_dma_chunk_limit(cur_phys, remaining);
+
+			// get a pointer to system memory if the address is inside main memory
+			char* memptr = cSystem->PtrToMem(cur_phys);
+
+			// Copy only within a single translated DMA page. Scatter-gather DMA does
+			// not guarantee that adjacent PCI bus addresses map to contiguous host
+			// physical memory beyond the current page.
+			if (memptr)
+			{
+				memcpy(dst, memptr, chunk);
+			}
+			else
+			{
+				for (el = 0; el < chunk; el++)
+					dst[el] = (u8)cSystem->ReadMem(cur_phys + el, 8, this);
+			}
+
+			dst += chunk;
+			cur_address += (u32)chunk;
+			remaining -= chunk;
 		}
+		return;
 
 #if defined(ES40_BIG_ENDIAN)
 	}
@@ -691,7 +716,7 @@ void CPCIDevice::do_pci_read(u32 address, void* dest, size_t element_size,
 	case 4:
 	{
 		*(u32*)dst = endian_32((u32)cSystem->ReadMem(phys_addr, 32, this));
-		dst += 4;;
+		dst += 4;
 		phys_addr += 4;
 	}
 	break;
@@ -741,17 +766,35 @@ void CPCIDevice::do_pci_write(u32 address, void* source, size_t element_size,
 	if (element_size == 1)
 	{
 #endif
+		size_t remaining = element_size * element_count;
+		u32 cur_address = address;
 
-		// get a pointer to system memory if the address is inside main memory
-		char* memptr = cSystem->PtrToMem(phys_addr);
-
-		// if the address is inside system memory, a simple memcpy operation is
-		// all that is needed.
-		if (memptr)
+		while (remaining != 0)
 		{
-			memcpy(memptr, source, element_size * element_count);
-			return;
+			u64 cur_phys = cSystem->PCI_Phys(myPCIBus, cur_address);
+			size_t chunk = pci_dma_chunk_limit(cur_phys, remaining);
+
+			// get a pointer to system memory if the address is inside main memory
+			char* memptr = cSystem->PtrToMem(cur_phys);
+
+			// Copy only within a single translated DMA page. Scatter-gather DMA does
+			// not guarantee that adjacent PCI bus addresses map to contiguous host
+			// physical memory beyond the current page.
+			if (memptr)
+			{
+				memcpy(memptr, src, chunk);
+			}
+			else
+			{
+				for (el = 0; el < chunk; el++)
+					cSystem->WriteMem(cur_phys + el, 8, (u8)src[el], this);
+			}
+
+			src += chunk;
+			cur_address += (u32)chunk;
+			remaining -= chunk;
 		}
+		return;
 
 #if defined(ES40_BIG_ENDIAN)
 	}
