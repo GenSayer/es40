@@ -24,7 +24,29 @@ VS build directory.
 ------------------------------------------------------------------------
 
 ## Status  
+  
+## 5/7/26 - Tru64 support. Red Hat 7.2 works. Timers fixed.  
+Thanks to a surprising AXPbox we have finalized the remaining SCSI flaws  
+that were blocking Tru64, and as well implemented some user-friendly features.  
+Red Hat 7.2's X11 doesn't play nicely yet though....  
+OS Support list looks like this now:  
+  
+Windows NT4 with graphics  
+Windows 2K RCs and AXP64 2210 with some effort with graphics  
+OpenVMS 8.4-2L1 and 2L2 with graphics  
+Tru64 5.1B with graphics  
+SOME Linux - Red Hat Enigma / 7.2 tested X11 flawed, needs to be fixed  
+NetBSD 6 through 10.1 at minimum  
+OpenBSD 4.8, 7.7, and 7.8  
+  
+Networking is only confirmed working on OpenVMS, however it may work on Tru64.  
 
+For windows hosts, we now have an emulated MPU-401 MIDI output device. Not full  
+sound, but MIDI players can send out music from the emulator now.  
+  
+## 4/30/26 - Windows NT support  
+That was a wild ride.  
+  
 ## 4/24/26 - ARC works!  
 Lingering screen corruption issue - memtest failure at 0x80000  
 Flash system from v73.iso with all options - exit the first stage updater  
