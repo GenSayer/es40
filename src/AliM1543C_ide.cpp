@@ -910,7 +910,20 @@ u32 CAliM1543C_ide::ide_control_read(int index, u32 address)
 	case 0:
 	{
 		SCOPED_READ_LOCK(mtRegisters[index]);
-		data = SEL_STATUS(index).alt_status;
+		// Compute live from current status flags rather than reading the
+		// cached alt_status, which only gets refreshed at UPDATE_ALT_STATUS
+		// call sites and can lag the controller thread (causing SRM read
+		// timeouts when busy goes false → drq true between updates).
+		if (SEL_DISK(index))
+		{
+			data = (SEL_STATUS(index).busy ? 0x80 : 0x00)
+				| (SEL_STATUS(index).drive_ready ? 0x40 : 0x00)
+				| (SEL_STATUS(index).fault ? 0x20 : 0x00)
+				| (SEL_STATUS(index).seek_complete ? 0x10 : 0x00)
+				| (SEL_STATUS(index).drq ? 0x08 : 0x00)
+				| (SEL_STATUS(index).index_pulse ? 0x02 : 0x00)
+				| (SEL_STATUS(index).err ? 0x01 : 0x00);
+		}
 #ifdef DEBUG_IDE_REG_CONTROL
 		static u32  last_data = 0;
 		if (last_data != data)
