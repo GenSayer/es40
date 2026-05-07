@@ -434,8 +434,6 @@ private:
   u64                                   prev_cc;
   u64                                   prev_time;
   u64                                   cc_per_instruction;
-  u64                                   ins_per_timer_int;
-  u64                                   next_timer_int;
   u64                                   cpu_hz;
 
   // DRAM fast-path cache 

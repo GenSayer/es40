@@ -1189,31 +1189,27 @@ void CAliM1543C::toy_write(u32 address, u8 data)
 			// The SRM-init value of 0x26 means:
 			//  xtal speed 32.768KHz  (standard)
 			//  periodic interrupt rate divisor of 32 = interrupt every 976.562 ms (1024Hz clock)
-			if (state.toy_stored_data[0x0a] & 0x80)
+			 
+			 
+			
+			// MC146818 UIP (Update-In-Progress) bit at register A bit 7.
+			// Real hardware pulses UIP high for ~244 µs every 1 second of
+			// wall-clock when the internal RTC is about to advance, then
+			// holds it low for the remainder of the second.  
 			{
-
-				// Once the UIP line goes high, we have to stay high for 2228us.
-				hold_count--;
-				if (hold_count == 0)
-				{
-					state.toy_stored_data[0x0a] &= ~0x80;
-					read_count = 0;
-				}
-			}
-			else
-			{
-
-				// UIP isn't high, so if we're looping and waiting for it to go, it
-				// will take 1,000,000/(IPus*3) reads for a 3 instruction loop.
-				// If it happens to be a one time read, it'll only throw our calculations
-				// off a tiny bit, and they'll be re-synced on the next read-loop.
-				read_count++;
-				if (read_count > 1000000 / (IPus * 3))   // 3541 @ 847IPus
-				{
+				using clk = std::chrono::steady_clock;
+				static auto uip_epoch = clk::now();
+				const auto now = clk::now();
+				const u64 elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+					now - uip_epoch).count();
+				const u64 sub_sec_us = elapsed_us % 1000000ull;
+				// UIP is high during the last 244 µs of each second.
+				if (sub_sec_us >= (1000000ull - 244ull))
 					state.toy_stored_data[0x0a] |= 0x80;
-					hold_count = (2228 / (IPus * 3)) + 1; // .876 @ 847IPus, so we add one.
-				}
+				else
+					state.toy_stored_data[0x0a] &= ~0x80;
 			}
+			(void)read_count; (void)hold_count;
 
 			//# /****************************************************/
 			//# #define RTC_CONTROL RTC_REG_B
@@ -1535,6 +1531,43 @@ void CAliM1543C::do_pit_clock()
 	{
 		pit_counter = 0;
 		pit_clock();
+	}
+
+	// MC146818 SQW output -> Cchip i_intim_l -> b_irq<2>.  Wall-clock-driven
+	// to decouple guest timer rate from emulated CPU throughput. 
+	do_interval_timer();
+}
+
+/**
+ * Fire the Cchip interval timer (b_irq<2>) at the rate programmed in
+ * MC146818 register A.  
+ *
+ * Called from do_pit_clock() at the AliM1543C thread's ~1 ms cadence.
+ **/
+void CAliM1543C::do_interval_timer()
+{
+	const u8 reg_a = state.toy_stored_data[0x0a];
+	const int rate_pow = reg_a & 0x0f;
+	if (rate_pow == 0)
+		return;
+
+	// Period select: with 32 KHz base (bit 5), the table differs at the
+	// short end of the divisor.  Matches the existing periodic-flag math.
+	double period = (1ULL << rate_pow) / 65536.0;
+	if (reg_a & 0x20)
+	{
+		if (rate_pow == 0x1)      period = 1.0 / 256.0;
+		else if (rate_pow == 0x2) period = 1.0 / 128.0;
+	}
+
+	using clk = std::chrono::steady_clock;
+	static auto last_fire = clk::now();
+	const auto now = clk::now();
+	const double elapsed = std::chrono::duration<double>(now - last_fire).count();
+	if (elapsed >= period)
+	{
+		cSystem->interrupt(-1, true); // sets MISC<ITINTR>, asserts b_irq<2>
+		last_fire = now;
 	}
 }
 

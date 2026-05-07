@@ -446,8 +446,6 @@ void CAlphaCPU::init()
 #else
 	cc_per_instruction = 70;
 #endif
-	ins_per_timer_int = cpu_hz / 1024;
-	next_timer_int = state.iProcNum ? U64(0xFFFFFFFFFFFFFFFF) : ins_per_timer_int;  /* only on CPU 0 */
 
 	state.r[22] = state.r[22 + 32] = state.iProcNum;
 
@@ -505,9 +503,6 @@ void CAlphaCPU::ResetForSystemReset()
 #else
 	cc_per_instruction = 70;
 #endif
-
-	ins_per_timer_int = cpu_hz / 1024;
-	next_timer_int = state.iProcNum ? U64(0xFFFFFFFFFFFFFFFF) : ins_per_timer_int;
 
 	state.r[22] = state.r[22 + 32] = state.iProcNum;
 
@@ -752,11 +747,6 @@ void CAlphaCPU::execute()
 		cc_large += _cc_accum;
 		if (state.cc_ena)
 			state.cc += _cc_accum;
-		if (cc_large > next_timer_int)
-		{
-			next_timer_int += ins_per_timer_int;
-			cSystem->interrupt(-1, true);
-		}
 		return;
 	}
 #endif
@@ -884,13 +874,6 @@ void CAlphaCPU::execute()
 				state.cc += _cc_accum;
 			_cc_accum = 0;
 
-			// Check timer
-			if (cc_large > next_timer_int)
-			{
-				next_timer_int += ins_per_timer_int;
-				cSystem->interrupt(-1, true);
-			}
-
 			// There are one or more active delayed irq_h interrupts. Go through the 6
 			// irq_h timers, decrease them as needed, and set the interrupt if the timer
 			// reaches 0. Batch to reduce memory ops.
@@ -926,12 +909,6 @@ void CAlphaCPU::execute()
 		cc_large += _cc_per_ins;
 		if (state.cc_ena)
 			state.cc += _cc_per_ins;
-
-		if (cc_large > next_timer_int)
-		{
-			next_timer_int += ins_per_timer_int;
-			cSystem->interrupt(-1, true);
-		}
 
 		// Process delayed irq_h timers one instruction at a time.
 		if (state.check_timers)
