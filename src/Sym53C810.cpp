@@ -1733,55 +1733,81 @@ void CSym53C810::execute_bm_op()
 		return;
 	}
 
-	if ((size_t)count > scsi_expected_xfer(0))
+	for (;;)
 	{
+		size_t expected = scsi_expected_xfer(0);
+		u32 remaining = GET_DBC();
+		u32 xfer = remaining;
+
+		if ((size_t)xfer > expected)
+		{
 #if defined(DEBUG_SYM_SCRIPTS)
-		printf("SYM: xfer %d bytes, max %d expected, in phase %d.\n", count,
-			scsi_expected_xfer(0), scsi_phase);
+			printf("SYM: xfer %u bytes, max %zu expected, in phase %d.\n",
+				xfer, expected, scsi_phase);
 #endif
-		count = (u32)scsi_expected_xfer(0);
+			xfer = (u32)expected;
+		}
+
+		if (xfer == 0)
+		{
+			// Target has nothing to provide/accept in this phase but DBC > 0.
+			// Raise phase mismatch so SCRIPTS can save the residual via DBC.
+			RAISE(SIST0, MA);
+			return;
+		}
+
+		u8* scsi_data_ptr = (u8*)scsi_xfer_ptr(0, xfer);
+		u8* org_sdata_ptr = scsi_data_ptr;
+
+		switch (scsi_phase)
+		{
+		case SCSI_PHASE_COMMAND:
+		case SCSI_PHASE_DATA_OUT:
+		case SCSI_PHASE_MSG_OUT:
+			do_pci_read(R32(DNAD), scsi_data_ptr, 1, xfer);
+			R32(DNAD) += xfer;
+			break;
+
+		case SCSI_PHASE_STATUS:
+		case SCSI_PHASE_DATA_IN:
+		case SCSI_PHASE_MSG_IN:
+			do_pci_write(R32(DNAD), scsi_data_ptr, 1, xfer);
+			R32(DNAD) += xfer;
+			break;
+		}
+
+		SET_DBC(remaining - xfer);
+		R8(SFBR) = *org_sdata_ptr;
+
+		// Update SIDL with last byte received during MSG_IN
+		if (scsi_phase == SCSI_PHASE_MSG_IN)
+			state.regs.reg8[R_SIDL] = scsi_data_ptr[xfer - 1];
+
+		if (GET_DBC() == 0)
+		{
+			// Clean completion; reflect just-completed phase in SSTAT1 for
+			// SCRIPTS that read it before the next check_phase.
+			R8(SSTAT1) = (R8(SSTAT1) & ~R_SSTAT1_PHASE)
+				| (scsi_phase & R_SSTAT1_PHASE);
+			scsi_xfer_done(0);
+			return;
+		}
+
+		// Residual remains. Hand the slice back to the target and re-check
+		// phase before continuing.
+		scsi_xfer_done(0);
+
+		phase_result = check_phase(scsi_phase);
+		if (phase_result <= 0)
+		{
+			// phase_result < 0: check_phase already raised STO/disconnect.
+			// phase_result == 0: phase shifted; RAISE MA so SCRIPTS can save
+			//                    residual via DBC.
+			if (phase_result == 0)
+				RAISE(SIST0, MA);
+			return;
+		}
 	}
-
-	u8* scsi_data_ptr = (u8*)scsi_xfer_ptr(0, count);
-	u8* org_sdata_ptr = scsi_data_ptr;
-
-	switch (scsi_phase)
-	{
-	case SCSI_PHASE_COMMAND:
-	case SCSI_PHASE_DATA_OUT:
-	case SCSI_PHASE_MSG_OUT:
-		do_pci_read(R32(DNAD), scsi_data_ptr, 1, count);
-		R32(DNAD) += count;
-		break;
-
-	case SCSI_PHASE_STATUS:
-	case SCSI_PHASE_DATA_IN:
-	case SCSI_PHASE_MSG_IN:
-		do_pci_write(R32(DNAD), scsi_data_ptr, 1, count);
-		R32(DNAD) += count;
-		break;
-	}
-
-	R8(SFBR) = *org_sdata_ptr;
-
-	// Update DFIFO and CTEST5 with residual byte count
-	u32 remaining = GET_DBC() - count;
-	SET_DBC(remaining);
-	// DFIFO gets low 7 bits of DBC (810 has 7-bit DFIFO)
-	// CTEST5 gets bits [9:8] of DBC in bits [1:0]
-	// (These are updated for register reads to reflect the residual count)
-
-	// Update SIDL with last byte received during MSG_IN
-	if (scsi_phase == SCSI_PHASE_MSG_IN && count > 0)
-	{
-		state.regs.reg8[R_SIDL] = scsi_data_ptr[count - 1];
-	}
-
-	// Update SSTAT1 phase bits after transfer 
-	R8(SSTAT1) = (R8(SSTAT1) & ~R_SSTAT1_PHASE) | (scsi_phase & R_SSTAT1_PHASE);
-
-	scsi_xfer_done(0);
-	return;
 
 }
 
