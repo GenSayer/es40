@@ -123,6 +123,7 @@ private:
 	CConfigurator* myCfg;
 	unsigned int   vid_scale = 0;
 	bool           vid_linear = true;
+	void           reset_window_size();
 };
 
 // declare one instance of the gui object and call macro to insert the
@@ -142,14 +143,16 @@ SDL_Event           sdl_event;
 int                 sdl_grab = 0;
 unsigned            res_x = 0, res_y = 0;
 unsigned            half_res_x, half_res_y;
+static int          last_driven_w = 0, last_driven_h = 0;
 u8                  old_mousebuttons = 0, new_mousebuttons = 0;
 int                 old_mousex = 0, new_mousex = 0;
 int                 old_mousey = 0, new_mousey = 0;
 static int          sdl_mouse_button_state = 0;
 static bool         sdl_swallow_keys = false;
 static bool         sdl_swallow_end_release = false;
-static const char*  sdl_title = "ES40 Emulator - Ctrl+Alt+End sends Ctrl+Alt+Del";
-static const char*  sdl_title_grabbed = "ES40 Emulator - Ctrl+F10 releases mouse - Ctrl+Alt+End sends Ctrl+Alt+Del";
+static bool         sdl_swallow_home_release = false;
+static const char*  sdl_title = "ES40 Emulator - Ctrl+Alt+End sends Ctrl+Alt+Del - Ctrl+Alt+Home resets window";
+static const char*  sdl_title_grabbed = "ES40 Emulator - Ctrl+F10 releases mouse - Ctrl+Alt+End sends Ctrl+Alt+Del - Ctrl+Alt+Home resets window";
 
 bx_sdl_gui_c::bx_sdl_gui_c(CConfigurator* cfg)
 {
@@ -441,6 +444,16 @@ void bx_sdl_gui_c::handle_events(void)
 				break;
 			}
 
+			// Ctrl+Alt+Home: reset window to last GPU-driven size
+			if (sdl_event.key.key == SDLK_HOME &&
+				(sdl_event.key.mod & SDL_KMOD_CTRL) &&
+				(sdl_event.key.mod & SDL_KMOD_ALT))
+			{
+				reset_window_size();
+				sdl_swallow_home_release = true;
+				break;
+			}
+
 			// Ctrl+F10: toggle mouse capture
 			if (sdl_event.key.key == SDLK_F10 && (sdl_event.key.mod & SDL_KMOD_CTRL))
 			{
@@ -495,6 +508,12 @@ void bx_sdl_gui_c::handle_events(void)
 			if (sdl_swallow_end_release && sdl_event.key.key == SDLK_END)
 			{
 				sdl_swallow_end_release = false;
+				break;
+			}
+
+			if (sdl_swallow_home_release && sdl_event.key.key == SDLK_HOME)
+			{
+				sdl_swallow_home_release = false;
 				break;
 			}
 
@@ -644,6 +663,23 @@ void bx_sdl_gui_c::dimension_update(unsigned x, unsigned y, unsigned fheight,
 	res_y = y;
 	half_res_x = x / 2;
 	half_res_y = y / 2;
+
+	// Remember the actual OS-pixel size we just drove the window to,
+	// so Ctrl+Alt+Home can snap back here after a manual resize.
+	last_driven_w = (int)scaled_x;
+	last_driven_h = (int)scaled_y;
+}
+
+void bx_sdl_gui_c::reset_window_size()
+{
+	if (!sdl_window || last_driven_w == 0 || last_driven_h == 0)
+		return;
+
+	SDL_WindowFlags flags = SDL_GetWindowFlags(sdl_window);
+	if (flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN))
+		SDL_RestoreWindow(sdl_window);
+
+	SDL_SetWindowSize(sdl_window, last_driven_w, last_driven_h);
 }
 
 void bx_sdl_gui_c::mouse_enabled_changed_specific(bool val)
