@@ -152,7 +152,38 @@ void CDPR::init()
 
 		// powerup time BCD:
 		time_t      now = time(NULL);
-		struct tm* t = localtime(&now);
+		bool        faked = false;
+
+		// Optional absolute time override (sys0 "time" config; same UTC parser
+		// as AliM1543C). DPR::init runs before AliM1543C::init, so we stay
+		// silent on parse failure — bad values trip AliM1543C's FAILURE_1
+		// before the guest starts.
+		char* faketime = myCfg->get_text_value("time");
+		if (faketime)
+		{
+			struct tm ft = {};
+			if (sscanf(faketime, "%d-%d-%d %d:%d:%d",
+				&ft.tm_year, &ft.tm_mon, &ft.tm_mday,
+				&ft.tm_hour, &ft.tm_min, &ft.tm_sec) >= 3)
+			{
+				ft.tm_year -= 1900;
+				ft.tm_mon -= 1;
+#ifdef _WIN32
+				time_t set_time = _mkgmtime(&ft);
+#else
+				time_t set_time = timegm(&ft);
+#endif
+				if (set_time != (time_t)-1)
+				{
+					now = set_time;
+					faked = true;
+				}
+			}
+		}
+
+		// Display in UTC when faketime is in effect (matches the TOY clock);
+		// host local otherwise (preserves existing behavior).
+		struct tm* t = faked ? gmtime(&now) : localtime(&now);
 		state.ram[i * 0x20 + 0x10] = ToBCD(t->tm_hour);
 		state.ram[i * 0x20 + 0x11] = ToBCD(t->tm_min);
 		state.ram[i * 0x20 + 0x12] = ToBCD(t->tm_sec);

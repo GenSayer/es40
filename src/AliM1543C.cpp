@@ -381,6 +381,37 @@ void CAliM1543C::init()
 		state.toy_stored_data[i] = 0;
 	state.toy_offset = 0;
 
+	// Optional absolute time override from sys0:
+	//   time = "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS"
+	// Interpreted as UTC to match the runtime ARC/SRM TOY edit path
+	// (see toy_write SET_TIME below). Sets the initial toy_offset; subsequent
+	// guest TOY writes still take precedence and overwrite this offset.
+	char* faketime = myCfg->get_myParent()->get_text_value("time");
+	if (faketime)
+	{
+		struct tm ft = {};
+		int n = sscanf(faketime, "%d-%d-%d %d:%d:%d",
+			&ft.tm_year, &ft.tm_mon, &ft.tm_mday,
+			&ft.tm_hour, &ft.tm_min, &ft.tm_sec);
+		if (n < 3)
+			FAILURE_1(Configuration,
+				"Invalid time format: %s (use YYYY-MM-DD or "
+				"YYYY-MM-DD HH:MM:SS)",
+				faketime);
+		ft.tm_year -= 1900;
+		ft.tm_mon -= 1;
+#ifdef _WIN32
+		time_t set_time = _mkgmtime(&ft);
+#else
+		time_t set_time = timegm(&ft);
+#endif
+		if (set_time == (time_t)-1)
+			FAILURE_1(Configuration, "Invalid time value: %s", faketime);
+		time_t host_now;
+		time(&host_now);
+		state.toy_offset = (long)(set_time - host_now);
+	}
+
 	state.toy_stored_data[0x17] = myCfg->get_bool_value("vga_console") ? 1 : 0;
 
 	if (state.toy_stored_data[0x17] && !theVGA)
