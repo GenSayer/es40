@@ -2096,8 +2096,13 @@ int CAlphaCPU::virt2phys(u64 virt, u64* phys, int flags, bool* asm_bit, u32 ins)
 	if (!(flags & NO_CHECK))
 	{
 
-		// check if requested access is allowed
-		if (!state.tb[t][i].access[flags & ACCESS_WRITE][cm])
+		// check if requested access is allowed.
+		// WRCHK (HRM 6.4.1: HW_LD type 1012/1112 WrChk variants) requires that
+		// BOTH read and write protection pass for the access mode -- fail if
+		// the natural-direction access bit is clear OR (when WRCHK is set on a
+		// read) the write access bit is also clear.
+		if (!state.tb[t][i].access[flags & ACCESS_WRITE][cm]
+		    || ((flags & WRCHK) && !state.tb[t][i].access[1][cm]))
 		{
 #if defined(DEBUG_TB)
 			if (forreal)
@@ -2153,8 +2158,11 @@ int CAlphaCPU::virt2phys(u64 virt, u64* phys, int flags, bool* asm_bit, u32 ins)
 			}
 		}
 
-		// check if requested access doesn't fault
-		if (state.tb[t][i].fault[flags & ACCESS_MODE])
+		// check if requested access doesn't fault.
+		// WRCHK additionally requires that the FOW bit be clear -- HRM 6.4.1
+		// WrChk variants check both FOR and FOW.
+		if (state.tb[t][i].fault[flags & ACCESS_MODE]
+		    || ((flags & WRCHK) && state.tb[t][i].fault[1]))
 		{
 #if defined(DEBUG_TB)
 			if (forreal)
@@ -2188,7 +2196,20 @@ int CAlphaCPU::virt2phys(u64 virt, u64* phys, int flags, bool* asm_bit, u32 ins)
 				state.fault_va = virt;
 				state.exc_sum = ((u64)REG_1 & 0x1f) << 8;  /* HRM 5.2.13: EXC_SUM REG[12:8] is 5 bits */
 
+				/* HRM 5.3.8 MM_STAT: FOR [bit 2] is set when a fault-on-read
+				 * error occurs during a read transaction with PTE[FOR] set.
+				 * FOW [bit 3] is set when a fault-on-write error occurs.
+				 * For HW_LD WrChk variants the chip is performing both a
+				 * read AND a write-protection check, so PTE[FOW] (if set)
+				 * is reportable too 
+				 */
 				u32 opcode = I_GETOP(ins);
+				int for_bit =
+					((flags & ACCESS_WRITE) == 0)
+					&& state.tb[t][i].fault[0] ? 4 : 0;
+				int fow_bit =
+					(((flags & ACCESS_WRITE) || (flags & WRCHK))
+					 && state.tb[t][i].fault[1]) ? 8 : 0;
 				state.mm_stat =
 					(
 						(opcode == 0x1b || opcode == 0x1f) ? opcode -
@@ -2196,7 +2217,7 @@ int CAlphaCPU::virt2phys(u64 virt, u64* phys, int flags, bool* asm_bit, u32 ins)
 						) <<
 					4 |
 					(flags & ACCESS_WRITE) |
-					((flags & ACCESS_WRITE) ? 8 : 4);
+					for_bit | fow_bit;
 				if (state.pal_vms)
 				{
 					if ((res = vmspal_ent_dfault(flags)))

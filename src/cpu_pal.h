@@ -422,8 +422,8 @@
     state.r[REG_1] = READ_PHYS_NT(32);                                        \
     break;                                                                    \
                                                                            \
-  case 10:      /* longword virtual check */                                  \
-    DATA_PHYS_NT(state.r[REG_2] + DISP_12, ACCESS_READ);                      \
+  case 10:      /* longword virtual check (HRM 6.4.1 TYPE 1012: WrChk) */     \
+    DATA_PHYS_NT(state.r[REG_2] + DISP_12, ACCESS_READ | WRCHK);              \
     state.r[REG_1] = READ_PHYS_NT(32);                                        \
     break;                                                                    \
                                                                            \
@@ -432,8 +432,8 @@
     state.r[REG_1] = READ_PHYS_NT(32);                                        \
     break;                                                                    \
                                                                            \
-  case 14:      /* longword virtual alt check */                              \
-    DATA_PHYS_NT(state.r[REG_2] + DISP_12, ACCESS_READ | ALT);                \
+  case 14:      /* longword virtual alt check (HRM TYPE 1112: WrChk/Alt) */   \
+    DATA_PHYS_NT(state.r[REG_2] + DISP_12, ACCESS_READ | ALT | WRCHK);        \
     state.r[REG_1] = READ_PHYS_NT(32);                                        \
     break;                                                                    \
                                                                            \
@@ -464,8 +464,8 @@
     state.r[REG_1] = READ_PHYS_NT(64);                                        \
     break;                                                                    \
                                                                            \
-  case 11:      /* quadword virtual check */                                  \
-    DATA_PHYS_NT(state.r[REG_2] + DISP_12, ACCESS_READ);                      \
+  case 11:      /* quadword virtual check (HRM 6.4.1 TYPE 1012: WrChk) */     \
+    DATA_PHYS_NT(state.r[REG_2] + DISP_12, ACCESS_READ | WRCHK);              \
     state.r[REG_1] = READ_PHYS_NT(64);                                        \
     break;                                                                    \
                                                                            \
@@ -474,8 +474,8 @@
     state.r[REG_1] = READ_PHYS_NT(64);                                        \
     break;                                                                    \
                                                                            \
-  case 15:      /* quadword virtual alt check */                              \
-    DATA_PHYS_NT(state.r[REG_2] + DISP_12, ACCESS_READ | ALT);                \
+  case 15:      /* quadword virtual alt check (HRM TYPE 1112: WrChk/Alt) */   \
+    DATA_PHYS_NT(state.r[REG_2] + DISP_12, ACCESS_READ | ALT | WRCHK);        \
     state.r[REG_1] = READ_PHYS_NT(64);                                        \
     break;                                                                    \
                                                                            \
