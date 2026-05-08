@@ -34,6 +34,16 @@ The ES1370 audio device outputs via the SDL layer. You can use guest OS volume
 controls or OS mixer level controls instead.  
   
 DECterm in OpenVMS causing machine check failures is FIXED!  
+This was the result of numerous CPU accuracy fixes.  
+
+If you build from source now, also, you can disable the custom emulator PALcode  
+implementations for OpenVMS as well, and run with purely native PALcode instead  
+of the accelerated implementations for debugging purposes and experimentation.  
+  
+Interestingly enough, only OpenVMS PALcode was visibly hurt by the flaws that   
+fixed it, OSF and NT PALcode weren't visibly affected (No OS flaws seen), but  
+VMS had ACCVIO 0in SECURESHRP on boot when using native PALcode, essentially  
+breaking OpenVMS entirely.  
   
 Networking in Tru64 appears to work, at least winth manual configuration!  
   
