@@ -25,11 +25,14 @@ VS build directory.
 
 ## Status  
   
-## 5/8/26 - TOY clock issue
+## 5/8/26 - TOY clock issue - SOUND SUPPORT! ES1370 Audio device! 
 For VMS it was not a one time boot prompt, I was wrong about how VMS handles  
 the time offsets. It sets the clock WITHOUT ARC's 1980 assumption.  
 So, we now make it a configurable flag.  
-
+  
+The ES1370 audio device outputs via the SDL layer. You can use guest OS volume  
+controls or OS mixer level controls instead.  
+  
 ## 5/7/26 - This one deserves its own notice. TOY clock handling change.  
 ARC base is 1980. This would make year byte 26 in TOY byte 9 2006 instead of  
 2026. But for everyone with installed VMS disk images out there, your saved  

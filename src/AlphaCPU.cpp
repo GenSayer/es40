@@ -1497,14 +1497,25 @@ void CAlphaCPU::execute()
 		}
 		break;
 
-	case 0x19:          // HW_MFPR
+	case 0x19:          // HW_MFPR (PALRES)
+		/* HRM 6.4 / 6.8.2: PALRES opcodes (0x19/0x1B/0x1D/0x1E/0x1F) raise
+		 * OPCDEC unless executing in PALmode or in kernel mode with I_CTL[HWE]
+		 * set. Matches brokenpipe palres_access_check(). */
+		if (!(state.pc & 1) && !(state.cm == 0 && state.hwe)) {
+			GO_PAL(OPCDEC);
+			ES40_EXECUTE_END();
+		}
 		function = (ins >> 8) & 0xff;
 		OP(HW_MFPR, MFPR);
 
 	case 0x1a:          // JSR* instructions
 		OP(JMP, JMP);
 
-	case 0x1b:          // PAL reserved - HW_LD
+	case 0x1b:          // PAL reserved - HW_LD (PALRES)
+		if (!(state.pc & 1) && !(state.cm == 0 && state.hwe)) {
+			GO_PAL(OPCDEC);
+			ES40_EXECUTE_END();
+		}
 		function = (ins >> 12) & 0xf;
 		if (function & 1)
 		{
@@ -1543,14 +1554,26 @@ void CAlphaCPU::execute()
 		}
 		break;
 
-	case 0x1d:          // HW_MTPR
+	case 0x1d:          // HW_MTPR (PALRES)
+		if (!(state.pc & 1) && !(state.cm == 0 && state.hwe)) {
+			GO_PAL(OPCDEC);
+			ES40_EXECUTE_END();
+		}
 		function = (ins >> 8) & 0xff;
 		OP(HW_MTPR, MTPR);
 
-	case 0x1e:
+	case 0x1e:          // HW_RET (PALRES)
+		if (!(state.pc & 1) && !(state.cm == 0 && state.hwe)) {
+			GO_PAL(OPCDEC);
+			ES40_EXECUTE_END();
+		}
 		OP(HW_RET, RET);
 
-	case 0x1f:          // HW_ST
+	case 0x1f:          // HW_ST (PALRES)
+		if (!(state.pc & 1) && !(state.cm == 0 && state.hwe)) {
+			GO_PAL(OPCDEC);
+			ES40_EXECUTE_END();
+		}
 		function = (ins >> 12) & 0xf;
 		if (function & 1)
 		{

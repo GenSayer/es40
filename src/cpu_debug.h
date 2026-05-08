@@ -306,6 +306,9 @@ void          handle_debug_string(char* s);
   }                                                                                   \
   dbg_strptr += strlen(dbg_strptr);
 
+/* IDB-disassembly variants -- log then raise OPCDEC, matching the non-IDB
+ * macros below. HRM 6.8.2 Table 6-8 mandates OPCDEC for unallocated
+ * encodings; brokenpipe routes them through the same path. */
 #define UNKNOWN1  if(bDisassemble)                        \
   {                                                       \
     DEBUG_XX                                              \
@@ -313,6 +316,7 @@ void          handle_debug_string(char* s);
   sprintf(dbg_strptr, "Unknown opcode: %02x   ", opcode); \
   dbg_strptr += strlen(dbg_strptr);                       \
   handle_debug_string(dbg_string);                        \
+  GO_PAL(OPCDEC);                                         \
   ES40_EXECUTE_END();
 
 #define UNKNOWN2  if(bDisassemble)                                       \
@@ -322,6 +326,7 @@ void          handle_debug_string(char* s);
   sprintf(dbg_strptr, "Unknown opcode: %02x.%02x   ", opcode, function); \
   dbg_strptr += strlen(dbg_strptr);                                      \
   handle_debug_string(dbg_string);                                       \
+  GO_PAL(OPCDEC);                                                        \
   ES40_EXECUTE_END();
 
 #define POST_X64(a)                           \
@@ -720,10 +725,26 @@ void          handle_debug_string(char* s);
 #define POST_F2_F3  POST_X64(state.f[FREG_3]);
 
 #else
-#define UNKNOWN1  printf("Unknown opcode: %02x   \n", opcode); \
+/* HRM 6.8.2 Table 6-8: OPCDEC fault is raised for opcodes 1-7, the PALRES
+ * opcodes (0x19/0x1B/0x1D/0x1E/0x1F) when not in PALmode and HWE is clear,
+ * for unimplemented function-field encodings of opcodes 0x14 and 0x1C, and
+ * for invalid CALL_PAL function values. brokenpipe (alphafix) routes all of
+ * these through the same `unallocated_encoding()` -> EXCP_OPCDEC path.
+ *
+ * The printfs are intentional diagnostic noise: if a truly missing opcode case
+ * exists in es40's dispatch, the warning will surface at the host stderr even
+ * though the architectural OPCDEC trap also fires. The hot path under a
+ * working guest workload should never see these. */
+#define UNKNOWN1                                                             \
+  printf("%%CPU-W-OPCDEC: unknown opcode %02x at pc=%016" PRIx64 "\n",       \
+         opcode, state.current_pc);                                          \
+  GO_PAL(OPCDEC);                                                            \
   ES40_EXECUTE_END();
 
-#define UNKNOWN2  printf("Unknown opcode: %02x.%02x   \n", opcode, function); \
+#define UNKNOWN2                                                             \
+  printf("%%CPU-W-OPCDEC: unknown opcode %02x.%02x at pc=%016" PRIx64 "\n",  \
+         opcode, function, state.current_pc);                                \
+  GO_PAL(OPCDEC);                                                            \
   ES40_EXECUTE_END();
 #endif
 #if defined(IDB)
