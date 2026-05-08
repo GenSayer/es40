@@ -391,19 +391,12 @@
     }                                                                            \
   }
 
+ /*
+  * HW_RET (HRM 6.4.3) is a simple jump-to-target on EV6/EV68. 
+  */
  #define DO_HW_RET   do {                                                               \
     u64 target = state.r[REG_2] & ~U64(0x2);                                            \
-    if (!(target & 1) &&                                                                \
-        ((state.eien & state.eir) || (state.sien & state.sir) ||                        \
-         (state.asten && (state.aster & state.astrr & ((1 << (state.cm + 1)) - 1)))))   \
-    {                                                                                   \
-      state.exc_addr = target;                                                          \
-      set_pc(state.pal_base + INTERRUPT + 1);                                           \
-    }                                                                                   \
-    else                                                                                \
-    {                                                                                   \
-      set_pc(target);                                                                   \
-    }                                                                                   \
+    set_pc(target);                                                                     \
   } while(0)
 
 #define DO_HW_LDL   switch(function)                                          \
