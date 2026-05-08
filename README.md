@@ -33,6 +33,10 @@ So, we now make it a configurable flag.
 The ES1370 audio device outputs via the SDL layer. You can use guest OS volume  
 controls or OS mixer level controls instead.  
   
+DECterm in OpenVMS causing machine check failures is FIXED!  
+  
+Networking in Tru64 appears to work, at least winth manual configuration!  
+  
 ## 5/7/26 - This one deserves its own notice. TOY clock handling change.  
 ARC base is 1980. This would make year byte 26 in TOY byte 9 2006 instead of  
 2026. But for everyone with installed VMS disk images out there, your saved  
