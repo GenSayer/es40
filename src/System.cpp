@@ -1137,7 +1137,6 @@ u64 CSystem::ReadMem(u64 address, int dsize, CSystemComponent* source)
 		if ((a == U64(0x00000801FC000CFC)) && (dsize == 32))
 		{
 			printf("PCI 0 config space read through CF8/CFC mechanism.   \n");
-			getc(stdin);
 			return ReadMem(U64(0x00000801FE000000) | state.cf8_address[0], dsize,
 				source);
 		}
@@ -1145,7 +1144,6 @@ u64 CSystem::ReadMem(u64 address, int dsize, CSystemComponent* source)
 		if ((a == U64(0x00000803FC000CFC)) && (dsize == 32))
 		{
 			printf("PCI 1 config space read through CF8/CFC mechanism.   \n");
-			getc(stdin);
 			return ReadMem(U64(0x00000803FE000000) | state.cf8_address[1], dsize,
 				source);
 		}
