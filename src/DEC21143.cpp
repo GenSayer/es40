@@ -1818,9 +1818,9 @@ void CDEC21143::ResetNIC()
 	state.srom.data[ 2] = subsysId  & 0xff;
 	state.srom.data[ 3] = (subsysId  >> 8) & 0xff;
 	/* bytes 4..14 = 0  (CIS pointers, ID_Reserved1) — left zero */
-	state.srom.data[15] = 0x00;     /* MiscHwOptions   - no PME/STSCHG */
-	state.srom.data[16] = 0x00;     /* Func0_HwOptions - no BootROM    */
-	/* byte 17 = ID_BLOCK_CRC, computed below */
+	state.srom.data[15] = 0x00;     /* MiscHwOptions   - no PME/STSCHG       */
+	/* byte 16 = ID_BLOCK_CRC (Appendix B: low byte of word 8), filled below */
+	state.srom.data[17] = 0x00;     /* Func0_HwOptions - no BootROM          */
 
 	/* Board info header (bytes 18..29) */
 	state.srom.data[TULIP_ROM_SROM_FORMAT_VERION] = 3;
@@ -1863,9 +1863,10 @@ void CDEC21143::ResetNIC()
 	state.srom.data[leaf++] = 0x00;           /* GPP Data MSB             */
 
 	/* ID_BLOCK_CRC (Appendix B): 8-bit CRC, MSB-first, poly 0x06, init 0xFF.
-	 * Calculated over the first 9 words; result lives in the low byte of
-	 * word 8 (= byte 17). Skips itself, not part of the CRC. This was ....
-	 * exceedingly confusing for a moment. */
+	 * Walks bits of the first 9 words MSB-first, stopping at word 8 bit 7.
+	 * Per the algorithm in the spec, the CRC result lands in the LOW byte
+	 * of word 8 (= byte 16). Byte 17 is the high byte of word 8 and is
+	 * INPUT to the walk (Func0_HwOptions in our layout, value 0). */
 	{
 		unsigned char crc8 = 0xFF;
 		for (int word = 0; word < 9; word++) {
@@ -1877,7 +1878,7 @@ void CDEC21143::ResetNIC()
 				if (bv) { crc8 ^= 0x06; crc8 |= 0x01; }
 			}
 		}
-		state.srom.data[17] = crc8;
+		state.srom.data[16] = crc8;
 	}
 
 	/*  MII Management decoder initial state:  */
