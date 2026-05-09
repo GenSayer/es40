@@ -245,6 +245,7 @@ void CSerial::init()
 {
 	disabled = myCfg->get_bool_value("disabled");
 	raw_mode = myCfg->get_bool_value("raw_mode");
+	null_attach = myCfg->get_bool_value("null_attach");
 	listenPort = (int)myCfg->get_num_value("port", false, 8000 + state.iNumber);
 
 	char    s[1000];
@@ -264,6 +265,42 @@ void CSerial::init()
 		listenSocket = INVALID_SOCKET;
 		connectSocket = INVALID_SOCKET;
 		printf("%s: disabled - guest will see no UART at this address.\n", devid_string);
+		return;
+	}
+
+	if (null_attach)
+	{
+		// Bit-bucket UART: port exists in the address map and presents itself as a
+		// healthy idle 16550 — TX shift register always empty (THRE/TSRE), modem
+		// signals up (CTS/DSR), RX FIFO permanently empty. TX bytes from the guest
+		// are silently discarded; nothing ever arrives at RX. No socket is opened,
+		// no I/O thread runs, no <BREAK> menu. ReadMem/WriteMem stay on the normal
+		// path so register reads return live values (e.g. LSR=0x60 because rcvR==rcvW),
+		// MCR.LOOP self-test still works (loopback writes go to rcvBuffer, never the
+		// socket), and TX-empty interrupts still fire when the guest enables IER.bit1.
+		state.rcvW = 0;
+		state.rcvR = 0;
+		state.bTHR = 0x00;
+		state.bRDR = 0x00;
+		state.bBRB_LSB = 0x00;
+		state.bBRB_MSB = 0x00;
+		state.bIER = 0x00;
+		state.bIIR = 0x01;  // no interrupt pending
+		state.bFCR = 0x00;
+		state.bLCR = 0x00;
+		state.bMCR = 0x00;
+		state.bLSR = 0x60;  // THRE, TSRE
+		state.bMSR = 0x30;  // CTS, DSR
+		state.bSPR = 0x00;
+		state.serial_cycles = 0;
+		state.irq_active = false;
+		iac_carry_len = 0;
+		in_subneg = false;
+		stageLen = 0;
+		myThread = 0;
+		listenSocket = INVALID_SOCKET;
+		connectSocket = INVALID_SOCKET;
+		printf("%s: null_attach - TX discarded, RX always empty.\n", devid_string);
 		return;
 	}
 
@@ -346,7 +383,7 @@ void CSerial::init()
 void CSerial::start_threads()
 {
 	char  buffer[5];
-	if (disabled)
+	if (disabled || null_attach)
 		return;
 	if (!myThread)
 	{
@@ -360,7 +397,7 @@ void CSerial::start_threads()
 
 void CSerial::stop_threads()
 {
-	if (disabled)
+	if (disabled || null_attach)
 		return;
 	StopThread = true;
 	if (myThread)
@@ -587,8 +624,8 @@ void CSerial::eval_interrupts()
 
 void CSerial::write(const char* s, int dsize)
 {
-	if (disabled)
-		return;
+	if (disabled || null_attach)
+		return;  // null_attach: drop TX silently; no socket to send on
 	int val = send(connectSocket, s, dsize, 0);
 }
 
@@ -684,7 +721,7 @@ void CSerial::run()
  **/
 void CSerial::check_state()
 {
-	if (disabled)
+	if (disabled || null_attach)
 		return;
 	if (breakHit)
 		serial_menu();

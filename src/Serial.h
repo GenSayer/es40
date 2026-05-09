@@ -169,6 +169,11 @@ private:
   int connectSocket;
   bool disabled = false;     ///< If true, port is not exposed to guest; reads return 0xff, writes ignored. Used to skip KDCOM probe on AXP64 2210 etc.
   bool raw_mode = false;     ///< If true, skip telnet IAC processing and connect banner. Use for windbg/kgdb where the byte stream must be 8-bit clean.
+  bool null_attach = false;  ///< If true, port exists on the bus but no socket is opened and no I/O thread runs.
+                             ///< Guest sees a healthy idle 16550 (THRE/TSRE, CTS/DSR); TX bytes are silently
+                             ///< dropped; RX FIFO is permanently empty. MCR.LOOP self-test still works (no
+                             ///< socket touched). Use when the guest expects a UART to exist but you don't
+                             ///< want a telnet listener — bit-bucket semantics, like QEMU's -serial null.
 #if defined(IDB) && defined(LS_MASTER)
   int throughSocket;
 #endif
