@@ -1782,18 +1782,42 @@ void CDEC21143::ResetNIC()
 	memset(&state.srom, 0, sizeof(state.srom));
 	memset(&state.mii, 0, sizeof(state.mii));
 
-	/*  Register values at reset, according to the manual:  */
-	state.reg[CSR_BUSMODE / 8] = 0xfe000000;  /*  csr0   */
-	state.reg[CSR_MIIROM / 8] = 0xfff483ff;   /*  csr9   */
-	state.reg[CSR_SIACONN / 8] = 0xffff0000;  /*  csr13  */
-	state.reg[CSR_SIATXRX / 8] = 0xffffffff;  /*  csr14  */
-	state.reg[CSR_SIAGEN / 8] = 0x8ff00000;   /*  csr15  */
+	/*  Register values at reset, per HRM tables 3-27/41/47/49/51/57/59/61/63/66:  */
+	state.reg[CSR_BUSMODE / 8] = 0xFE000000;  /* csr0  */
+	state.reg[CSR_TXPOLL / 8] = 0xFFFFFFFF;  /* csr1  */
+	state.reg[CSR_RXPOLL / 8] = 0xFFFFFFFF;  /* csr2  */
+	state.reg[CSR_STATUS / 8] = 0xF0000000;  /* csr5  */
+	state.reg[CSR_OPMODE / 8] = 0x32000040;  /* csr6  - includes MBO */
+	state.reg[CSR_INTEN / 8] = 0xF3FE0000;  /* csr7  */
+	state.reg[CSR_MISSED / 8] = 0xE0000000;  /* csr8  */
+	state.reg[CSR_MIIROM / 8] = 0xFFF483FF;  /* csr9  */
+	state.reg[CSR_GPT / 8] = 0xFFFE0000;  /* csr11 */
+	state.reg[CSR_SIASTAT / 8] = 0x000000C6;  /* csr12 - link‑fail until autoneg */
+	state.reg[CSR_SIACONN / 8] = 0xFFFF0000;  /* csr13 */
+	state.reg[CSR_SIATXRX / 8] = 0xFFFFFFFF;  /* csr14 */
+	state.reg[CSR_SIAGEN / 8] = 0x8FF00000;  /* csr15 */
 
 	state.tx.idling_threshold = 10;
 	state.rx.cur_addr = state.tx.cur_addr = 0;
 
-	/*  Version (= 1) and Chip count (= 1):  */
-	state.srom.data[TULIP_ROM_SROM_FORMAT_VERION] = 1;
+	/* SROM v3 build per Digital "21X4 Serial ROM Format" 4.05.
+	 * v3 is the lowest version that defines extended-format info blocks
+	 * and 21143 block types  */
+
+	/* ID Block (bytes 0..17) — single-function format 5 */
+	const uint16_t subsysVid = 0x1011;   /* DEC                 */
+	const uint16_t subsysId  = 0x500B;   /* DE-500BA            */
+	state.srom.data[ 0] = subsysVid & 0xff;
+	state.srom.data[ 1] = (subsysVid >> 8) & 0xff;
+	state.srom.data[ 2] = subsysId  & 0xff;
+	state.srom.data[ 3] = (subsysId  >> 8) & 0xff;
+	/* bytes 4..14 = 0  (CIS pointers, ID_Reserved1) — left zero */
+	state.srom.data[15] = 0x00;     /* MiscHwOptions   - no PME/STSCHG */
+	state.srom.data[16] = 0x00;     /* Func0_HwOptions - no BootROM    */
+	/* byte 17 = ID_BLOCK_CRC, computed below */
+
+	/* Board info header (bytes 18..29) */
+	state.srom.data[TULIP_ROM_SROM_FORMAT_VERION] = 3;
 	state.srom.data[TULIP_ROM_CHIP_COUNT] = 1;
 
 	/*  Set the MAC address:  */
@@ -1804,35 +1828,54 @@ void CDEC21143::ResetNIC()
 	state.srom.data[TULIP_ROM_CHIPn_INFO_LEAF_OFFSET(0)] = leaf & 255;
 	state.srom.data[TULIP_ROM_CHIPn_INFO_LEAF_OFFSET(0) + 1] = leaf >> 8;
 
-	state.srom.data[leaf + TULIP_ROM_IL_SELECT_CONN_TYPE] = 0;  /*  Not used?  */
-	state.srom.data[leaf + TULIP_ROM_IL_MEDIA_COUNT] = 2;
-	leaf += TULIP_ROM_IL_MEDIAn_BLOCK_BASE;
+	/* Controller info leaf (offset 30) — 21143 7.5.1 */
+	state.srom.data[leaf + 0] = 0x00;   /* Selected Conn Type LSB         */
+	state.srom.data[leaf + 1] = 0x08;   /* MSB -> 0x0800 Powerup+Dynamic   */
+	state.srom.data[leaf + 2] = 2;      /* Block Count = 2                */
+	leaf += 3;
 
-	state.srom.data[leaf] = 7;      /*  descriptor length  */
-	state.srom.data[leaf + 1] = TULIP_ROM_MB_21142_SIA;
-	state.srom.data[leaf + 2] = TULIP_ROM_MB_MEDIA_100TX;
+	/* 21143 SYM 100BaseTX-FDX (type 4, extended) 7.5.2.1.3
+	 * The DE-500BA uses the chip's internal SYM scrambler/PCS for 100TX
+	 * - there is NO external MII PHY on this board.  */
+	state.srom.data[leaf++] = 0x80 | 8;       /* F=1, length=8                       */
+	state.srom.data[leaf++] = TULIP_ROM_MB_21143_SYM;
+	state.srom.data[leaf++] = TULIP_ROM_MB_MEDIA_100TX_FDX;  /* 0x05 = 100BaseTX FDX */
+	state.srom.data[leaf++] = 0x00;           /* GPP Control LSB - no GPP needed     */
+	state.srom.data[leaf++] = 0x00;           /* GPP Control MSB                     */
+	state.srom.data[leaf++] = 0x00;           /* GPP Data LSB                        */
+	state.srom.data[leaf++] = 0x00;           /* GPP Data MSB                        */
+	state.srom.data[leaf++] = 0x71;           /* Command LSB: PCS|SCR|Active_inv|PS  */
+	state.srom.data[leaf++] = 0x00;           /* Command MSB                         */
 
-	/*  here comes 4 bytes of GPIO control/data settings  */
-	leaf += state.srom.data[leaf];
+	/* 21142/3 SIA 10BaseT (type 2, extended, EXT=0) 7.4.2.1.1 */
+	state.srom.data[leaf++] = 0x80 | 6;       /* F=1, length=6 (no Media Specific Data) */
+	state.srom.data[leaf++] = TULIP_ROM_MB_21142_SIA;
+	state.srom.data[leaf++] = 0x00;           /* EXT=0, MediaCode=0 (10BaseT) */
+	state.srom.data[leaf++] = 0x00;           /* GPP Control LSB          */
+	state.srom.data[leaf++] = 0x00;           /* GPP Control MSB          */
+	state.srom.data[leaf++] = 0x00;           /* GPP Data LSB             */
+	state.srom.data[leaf++] = 0x00;           /* GPP Data MSB             */
 
-	state.srom.data[leaf] = 15;     /*  descriptor length  */
-	state.srom.data[leaf + 1] = TULIP_ROM_MB_21142_MII;
-	state.srom.data[leaf + 2] = 0;  /*  PHY nr  */
-	state.srom.data[leaf + 3] = 0;  /*  len of select sequence  */
-	state.srom.data[leaf + 4] = 0;  /*  len of reset sequence  */
+	/* ID_BLOCK_CRC (Appendix B): 8-bit CRC, MSB-first, poly 0x06, init 0xFF.
+	 * Calculated over the first 9 words; result lives in the low byte of
+	 * word 8 (= byte 17). Skips itself, not part of the CRC. This was ....
+	 * exceedingly confusing for a moment. */
+	{
+		unsigned char crc8 = 0xFF;
+		for (int word = 0; word < 9; word++) {
+			uint16_t w = state.srom.data[word*2] | (state.srom.data[word*2 + 1] << 8);
+			for (int bit = 15; bit >= 0; bit--) {
+				if (word == 8 && bit == 7) break;
+				unsigned char bv = ((w >> bit) & 1) ^ ((crc8 >> 7) & 1);
+				crc8 <<= 1;
+				if (bv) { crc8 ^= 0x06; crc8 |= 0x01; }
+			}
+		}
+		state.srom.data[17] = crc8;
+	}
 
-	/*  5,6, 7,8, 9,10, 11,12, 13,14 = unused by GXemul  */
-	leaf += state.srom.data[leaf];
-
-	/*  MII PHY initial state:  */
+	/*  MII Management decoder initial state:  */
 	state.mii.state = MII_STATE_RESET;
-
-	/*  PHY #0:  */
-	state.mii.phy_reg[MII_BMSR] = BMSR_100TXFDX |
-		BMSR_10TFDX |
-		BMSR_ACOMP |
-		BMSR_ANEG |
-		BMSR_LINK;
 
 	state.tx.suspend = false;
 
