@@ -196,8 +196,6 @@ private:
       u32             cur_addr;
       unsigned char* cur_buf;
       int             cur_buf_len;
-      int             idling;
-      int             idling_threshold;
       bool            suspend;
     } tx;
 

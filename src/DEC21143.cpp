@@ -448,7 +448,6 @@ void CDEC21143::init()
 	/* Use a 2KB TX scratch buffer like QEMU's tulip (tx_frame[2048]) to avoid overflows. */
 	state.tx.cur_buf = (unsigned char*)malloc(2048);
 	state.irq_was_asserted = false;
-	state.tx.idling = 0;
 
 	ResetPCI();
 	ResetNIC();   // explicit one-shot internal reset; previously implicit via ResetPCI
@@ -646,7 +645,6 @@ void CDEC21143::nic_write(u32 address, int dsize, u32 data)
 		/* CaVa interpretation... */
 		state.reg[CSR_STATUS / 8] &= ~STATUS_TU;
 		state.tx.suspend = false;
-		state.tx.idling = state.tx.idling_threshold;
 		mySemaphore.tryWait(0);
 		mySemaphore.set();
 		break;
@@ -1416,14 +1414,12 @@ int CDEC21143::dec21143_tx()
 	/*  Only process packets owned by the 21143:  */
 	if (!(tdes0 & TDSTAT_OWN))
 	{
-		if (state.tx.idling > state.tx.idling_threshold)
-		{
-			state.reg[CSR_STATUS / 8] |= STATUS_TU;
-			state.tx.suspend = true;
-			state.tx.idling = 0;
-		}
-		else
-			state.tx.idling++;
+		/* HRM 4.3.7.1: on fetching an unowned descriptor, the chip raises
+		 * STATUS_TU and moves to suspended state. Do this immediately, no
+		 * idle threshold. */
+		state.reg[CSR_STATUS / 8] |= STATUS_TU;
+		state.tx.suspend = true;
+		update_irq();
 		return 0;
 	}
 
@@ -1772,7 +1768,6 @@ void CDEC21143::ResetNIC()
 	state.rx.cur_buf_len = 0;
 	state.tx.cur_buf_len = 0;
 	state.tx.suspend = false;
-	state.tx.idling = 0;
 
 	// Drop any partially assembled RX buffer.
 	if (state.rx.cur_buf != NULL)
@@ -1803,7 +1798,6 @@ void CDEC21143::ResetNIC()
 	state.reg[CSR_SIATXRX / 8] = 0xFFFFFFFF;  /* csr14 */
 	state.reg[CSR_SIAGEN / 8] = 0x8FF00000;  /* csr15 */
 
-	state.tx.idling_threshold = 10;
 	state.rx.cur_addr = state.tx.cur_addr = 0;
 
 	/* SROM v3 build per Digital "21X4 Serial ROM Format" 4.05.
