@@ -346,18 +346,19 @@ int main(int argc, char* argv[])
 #if defined(HAVE_SDL)
 	gui_q.addAnswer("SDL", "sdl", "Simple Directmedia Layer. Preferred GUI mechanism.");
 #endif
-#if defined(HAVE_X11)
-	gui_q.addAnswer("X11", "X11", "Unix X-Windows GUI support.");
-#endif
-#if defined(_WIN32)
-	gui_q.addAnswer("win32", "win32", "Windows 32 GUI support.");
-#endif
+//#if defined(HAVE_X11)
+//	gui_q.addAnswer("X11", "X11", "Unix X-Windows GUI support.");
+//#endif
+//#if defined(_WIN32)
+//	gui_q.addAnswer("win32", "win32", "Windows 32 GUI support.");
+//#endif
 
 	if (gui_q.countAnswers() == 1)
 	{
 		/* The only valid answer is "none".
 		 */
-		cout << "\nSorry, the GUI is not available! (no SDL, win32 or X11 support found).\n";
+		//cout << "\nSorry, the GUI is not available! (no SDL, win32 or X11 support found).\n";
+		cout << "\nSorry, the GUI is not available! (no SDL support found).\n";
 		gui_q.setAnswer("");
 	}
 	else
@@ -507,26 +508,26 @@ int main(int argc, char* argv[])
 
 	NumberQuestion cpu_q;
 
-	cpu_q.setQuestion("How many CPU's do you want in the system?");
-	cpu_q.setRange(1, 4);
+	cpu_q.setQuestion("How many CPU's do you want in the system (Currently, only one is supported)?");
+	cpu_q.setRange(1, 1);
 	cpu_q.setDefault("1");
 	cpu_q.setExplanation("The normal value for the number of CPU's is 1. More CPU's are very experimental, and currently doesn't work.");
 
 	cpu_q.ask();
 
-	MultipleChoiceQuestion icache_q;
+	//MultipleChoiceQuestion icache_q;
 
-	icache_q.setQuestion("Do you want the ICACHE on the CPU's enabled?");
-	icache_q.setExplanation("The ICACHE makes the CPU emulation more accurate, but also slows down the emulator. Decent operating systems shouldn't depend on this.");
-	icache_q.setDefault("yes");
-	icache_q.addAnswer("yes", "true", "ICACHE enabled. Performance hit, but may be necessary for some software.");
-	icache_q.addAnswer("no", "false", "ICACHE disabled. Better performance, but may not always work.");
+	//icache_q.setQuestion("Do you want the ICACHE on the CPU's enabled?");
+	//icache_q.setExplanation("The ICACHE makes the CPU emulation more accurate, but also slows down the emulator. Decent operating systems shouldn't depend on this.");
+	//icache_q.setDefault("yes");
+	//icache_q.addAnswer("yes", "true", "ICACHE enabled. Performance hit, but may be necessary for some software.");
+	//icache_q.addAnswer("no", "false", "ICACHE disabled. Better performance, but may not always work.");
 
-	icache_q.ask();
+	//icache_q.ask();
 
 	NumberQuestion mhz_q;
 
-	mhz_q.setQuestion("What should the reported speed of the CPU's be in MHz?");
+	mhz_q.setQuestion("What should the reported to guest platform speed of the CPU's be in MHz?");
 	mhz_q.setExplanation("This only changes the CPU speed reported to the OS; not the speed of the emulation.");
 	mhz_q.setRange(10, 1250);
 	mhz_q.setDefault("500");
@@ -541,7 +542,8 @@ int main(int argc, char* argv[])
 		os << "  cpu" << i << " = ev68cb\n";
 		os << "  {\n";
 		os << "    speed = " << mhz_q.getAnswer() << "M;\n";
-		os << "    icache = " << icache_q.getAnswer() << ";\n";
+		//os << "    icache = " << icache_q.getAnswer() << ";\n";
+		os << "    icache = true;\n";
 		os << "  }\n\n";
 	}
 
@@ -553,15 +555,53 @@ int main(int argc, char* argv[])
 	  */
 	for (int i = 0; i < 2; i++)
 	{
-		NumberQuestion port_q;
-		port_q.setQuestion("What telnet port should serial " + i2s(i) + " listen?");
-		port_q.setRange(1, 65535);
-		/* The default ports are 21264 and 21265.
+		/* Port number — accepts a numeric port or "none" for a bit-bucket
+		 * (null_attach) UART.
 		 */
+		FreeTextQuestion port_q;
+		port_q.setQuestion("What telnet port should serial " + i2s(i) + " listen?");
+		port_q.setOptions("1-65535 or 'none'");
+		/* The default ports are 21264 and 21265. */
 		port_q.setDefault(i2s(21264 + i));
-		port_q.setExplanation("You will telnet to this port to establish a connection with emulated serial port " + i2s(i) + ".");
+		port_q.setExplanation(
+			"You will telnet to this port to establish a connection with emulated serial port "
+			+ i2s(i) + ".\n"
+			"Answer 'none' to make this port a bit-bucket: the UART still exists on the bus and "
+			"presents itself to the guest as a healthy idle 16550 (THRE/TSRE, CTS/DSR), but no "
+			"telnet listener is opened and any bytes the guest transmits are silently discarded. "
+			"Useful since two are required by the platform firmwares in case you don't need them.");
 
-		port_q.ask();
+		bool is_null = false;
+		for (;;)
+		{
+			port_q.ask();
+			if (port_q.getAnswer() == "none")
+			{
+				is_null = true;
+				break;
+			}
+			try
+			{
+				int v = s2i(port_q.getAnswer());
+				if (v >= 1 && v <= 65535)
+					break;
+				cout << "\nPlease enter a port in 1..65535, or 'none'.\n\n";
+			}
+			catch (CLogicException)
+			{
+				cout << "\nPlease enter an integer port number, or 'none'.\n\n";
+			}
+		}
+
+		if (is_null)
+		{
+			/* Bit-bucket port — skip the action/args prompts entirely. */
+			os << "  serial" << i << " = serial\n";
+			os << "  {\n";
+			os << "    null_attach = true;\n";
+			os << "  }\n\n";
+			continue;
+		}
 
 		FreeTextQuestion exec_q;
 		exec_q.setQuestion("What program should be started automatically for serial " + i2s(i) + "?");
@@ -622,35 +662,22 @@ int main(int argc, char* argv[])
 	 * Floppy Disks                *
 	 * **************************** */
 
-	MultipleChoiceQuestion fdc_q;
+	/* The floppy controller is always present. The user only chooses
+	 * whether to attach any drives to it.
+	 */
+	ShrinkingChoiceQuestion fd_q;
+	fd_q.setQuestion("Do you want to add any disks to the Floppy controller?");
+	fd_q.setDefault("none");
+	fd_q.setExplanation("Here, you can add floppy drives to your system.");
+	fd_q.addAnswer("none", "", "stop adding disks");
+	fd_q.addAnswer("0", "disk0.0", "A:");
+	fd_q.addAnswer("1", "disk0.1", "B:");
 
-	fdc_q.setQuestion("Do you want a floppy controller in your system?");
-	fdc_q.setExplanation("You need a floppy controller if you want to add floppy drives.");
-	fdc_q.setDefault("no");
-	fdc_q.addAnswer("yes", "fdc", "FDC present.");
-	fdc_q.addAnswer("no", "", "FDC not present.");
-
-	if (fdc_q.ask() != "")
-	{
-		/* Use a ShrinkingChoiceQuestion; once
-		 * a disk position has been used, it
-		 * can't be used again.
-		 */
-		ShrinkingChoiceQuestion fd_q;
-		fd_q.setQuestion("Do you want to add any disks to the Floppy controller?");
-		fd_q.setDefault("none");
-		fd_q.setExplanation("Here, you can add floppy drives to your system.");
-		fd_q.addAnswer("none", "", "stop adding disks");
-		fd_q.addAnswer("0", "disk0.0", "A:");
-		fd_q.addAnswer("1", "disk0.1", "B:");
-
-		os << "  fdc0 = floppy\n";
-		os << "  {\n";
-		/* Ask what disks to add.
-		 */
-		add_disks(&fd_q, &os);
-		os << "  }\n\n";
-	}
+	os << "  fdc0 = floppy\n";
+	os << "  {\n";
+	/* Ask what disks to add. */
+	add_disks(&fd_q, &os);
+	os << "  }\n\n";
 
 	/* **************************** *
 	 * ALi IDE Disks                *
@@ -895,7 +922,7 @@ int main(int argc, char* argv[])
 	mpu_q.setQuestion("Would you like to emulate the MPU-401 MIDI device?");
 	mpu_q.addAnswer("no", "", "Disable the MPU-401");
 	mpu_q.addAnswer("yes", "yes", "Enable the MPU-401");
-	mpu_q.setDefault("yes");
+	mpu_q.setDefault("no");
 	mpu_q.ask();
 
 	if (mpu_q.getAnswer() != "")
@@ -925,7 +952,7 @@ int main(int argc, char* argv[])
 	mouse_q.setExplanation("The mouse is not really working yet... :-(");
 	mouse_q.addAnswer("no", "false", "Disable the mouse");
 	mouse_q.addAnswer("yes", "true", "Enable the mouse");
-	mouse_q.setDefault("no");
+	mouse_q.setDefault("yes");
 
 	MultipleChoiceQuestion vgacons_q;
 	vgacons_q.setQuestion("Where would you like console output to go?");
