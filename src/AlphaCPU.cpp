@@ -409,6 +409,7 @@ void CAlphaCPU::init()
 	memset(&state, 0, sizeof(state));
 
 	cpu_hz = myCfg->get_num_value("speed", true, 500000000);
+	vmspal_lle_enabled = myCfg->get_bool_value("palcode.vms.nohle", false);
 
 	state.iProcNum = cSystem->RegisterCPU(this);
 
